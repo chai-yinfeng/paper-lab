@@ -237,10 +237,33 @@ export default function App() {
     await api("/session", "PUT", { paper_id: paper.id, thread_id: t.id });
     return t;
   }
-  async function configureDirectory() {
+  async function configureDirectory(path = directory) {
     setBusy(true);
     try {
-      const s = await api<Status>("/workspace", "POST", { path: directory });
+      const s = await api<Status>("/workspace", "POST", { path });
+      setStatus(s);
+      setConfig(s.provider);
+      localStorage.setItem("paper-lab-directory", s.data_dir!);
+      await restoreSession();
+      setError("");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function pickDirectory() {
+    setBusy(true);
+    try {
+      const picked = await api<{ path: string | null }>(
+        "/workspace/pick",
+        "POST",
+      );
+      if (!picked.path) return;
+      setDirectory(picked.path);
+      const s = await api<Status>("/workspace", "POST", {
+        path: picked.path,
+      });
       setStatus(s);
       setConfig(s.provider);
       localStorage.setItem("paper-lab-directory", s.data_dir!);
@@ -903,12 +926,23 @@ export default function App() {
         {dialogError}
         <label>
           本地工作目录
-          <input
-            value={directory}
-            disabled={status?.configured || busy}
-            placeholder="/absolute/path/my-paper-library"
-            onChange={(e) => setDirectory(e.target.value)}
-          />
+          <div className="directory-field">
+            <input
+              value={directory}
+              disabled={status?.configured || busy}
+              placeholder="选择文件夹，或输入绝对路径"
+              onChange={(e) => setDirectory(e.target.value)}
+            />
+            {!status?.configured && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void pickDirectory()}
+              >
+                {busy ? "正在打开…" : "选择文件夹…"}
+              </button>
+            )}
+          </div>
         </label>
         {status?.configured ? (
           <p className="muted small">
@@ -918,7 +952,7 @@ export default function App() {
           <button
             className="primary"
             disabled={!directory || busy}
-            onClick={() => void configureDirectory()}
+            onClick={() => void configureDirectory(directory)}
           >
             {busy ? "正在打开…" : "打开工作目录"}
           </button>
@@ -926,7 +960,7 @@ export default function App() {
         <p className="small muted">
           PDF 统一放在
           pdfs/；对话、笔记和进度保存在同一工作目录。选择空目录或已有 Paper Lab
-          目录。
+          目录。“选择文件夹”会在选定后直接打开目录。
         </p>
         <hr />
         <label>

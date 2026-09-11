@@ -241,6 +241,9 @@ dialog {
   border-radius: 12px;
   padding: 28px;
   box-shadow: 0 15px 80px #1f34292a;
+  background: #ffffff;
+  color: #28352f;
+  color-scheme: light;
 }
 dialog::backdrop {
   background: #20302455;
@@ -255,6 +258,20 @@ select {
   border: 1px solid #d5ddd1;
   border-radius: 6px;
   background: white;
+  color: #28352f;
+  -webkit-text-fill-color: #28352f;
+}
+input::placeholder {
+  color: #7b857c;
+  -webkit-text-fill-color: #7b857c;
+  opacity: 1;
+}
+input:disabled,
+select:disabled {
+  background: #eef1ec;
+  color: #667168;
+  -webkit-text-fill-color: #667168;
+  opacity: 1;
 }
 label {
   display: block;
@@ -765,6 +782,18 @@ dialog h2 {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 22px;
+}
+.directory-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 5px;
+}
+.directory-field input {
+  margin-top: 0;
+}
+.directory-field button {
+  white-space: nowrap;
 }
 .small {
   font-size: 12px;

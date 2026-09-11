@@ -23,7 +23,7 @@ from .documents import MAX_PDF, crop, import_pdf, validate_anchor
 from .providers import ProviderSettings, stream_completion
 from .search import download, search
 from .store import decoded, stamp, uid
-from .workspace import REPO, Workspace
+from .workspace import REPO, Workspace, pick_directory
 
 
 def create_app():
@@ -132,6 +132,12 @@ def create_app():
                 )
             app.state.workspace = await run_in_threadpool(Workspace, body.path)
         return status()
+
+    @app.post("/api/workspace/pick")
+    async def pick_workspace():
+        if app.state.workspace:
+            raise ValueError("工作目录已经打开。切换目录请重启服务。")
+        return {"path": await run_in_threadpool(pick_directory)}
 
     @app.put("/api/provider")
     def update_provider(body: ProviderSettings):

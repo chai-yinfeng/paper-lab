@@ -211,6 +211,24 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             "test-placeholder", json.dumps(self.db.all("SELECT * FROM settings"))
         )
 
+    async def test_native_directory_picker_returns_path_or_cancel(self):
+        workspace = self.app.state.workspace
+        self.app.state.workspace = None
+        try:
+            with patch(
+                "paper_lab.api.pick_directory", return_value="/tmp/paper-lab-choice"
+            ):
+                response = await self.client.post("/api/workspace/pick")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"path": "/tmp/paper-lab-choice"})
+
+            with patch("paper_lab.api.pick_directory", return_value=None):
+                response = await self.client.post("/api/workspace/pick")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"path": None})
+        finally:
+            self.app.state.workspace = workspace
+
     async def test_single_and_pair_have_bounded_calls_and_saved_usage(self):
         for workflow, count in [("specialist", 1), ("reader-checker", 2)]:
             calls = []

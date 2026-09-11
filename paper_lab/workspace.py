@@ -1,10 +1,34 @@
 from __future__ import annotations
 import json
 import hashlib
+import platform
+import subprocess
 from pathlib import Path
 from .store import Store
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def pick_directory() -> str | None:
+    """Open the native macOS folder picker for this local application."""
+    if platform.system() != "Darwin":
+        raise ValueError("当前系统暂不支持原生目录选择，请输入绝对路径。")
+    script = (
+        'POSIX path of (choose folder with prompt '
+        '"选择 Paper Lab 工作目录（请选择空目录或已有工作目录）")'
+    )
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip().rstrip("/")
+    if "User canceled" in result.stderr or "(-128)" in result.stderr:
+        return None
+    raise ValueError("无法打开目录选择器，请直接输入绝对路径。")
 
 
 class Workspace:
