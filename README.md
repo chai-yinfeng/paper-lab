@@ -1,107 +1,87 @@
 # Paper Lab
 
-在 Codex 里用四个独立视角深读论文，保存一份可以质疑、核验证据和持续讨论的 mental model。
-中文解释，保留英文术语、原始标题、公式与必要原文；第一版默认完整 council。
+本地论文阅读工作台：在 PDF 原文旁边讨论原理，选中文字或框选图表提问，手动保存自己的理解。
+中文解释，保留必要的 English terms 和公式。应用通过 LLM API 运行，不依赖 Codex 或 ChatGPT 会话。
 
-当前保留旧版 council 工具与协议，正在重新设计为内置 PDF 阅读、Specialist 对话和可选检查流程。
-论文分析与旧版实跑验收记录已移除。以下命令描述旧版工具，不代表新阅读 UI 已实现。
+## 已实现
 
-## 在 Codex 中使用
+- 自定义本地工作目录；上传与 arXiv 搜索下载统一导入 `pdfs/`，按 SHA256 去重。
+- PDF.js 预览、目录、分页、缩放、文字选择和矩形选区；引用回跳到物理页码。
+- 每篇论文多个主题对话，流式回答、停止生成、恢复阅读位置和最近主题。
+- 默认 Specialist，一次模型调用；Reader + Checker 显式选择，最多两次调用。
+- 原文上下文预览；按当前页、相邻页和词项相关性补充同篇片段，不自动外部搜索。
+- 对话自动保存，笔记手动确认、编辑、导出 Markdown。
+- DeepSeek 与 OpenAI-compatible provider 接口；默认 `deepseek-flash`（V4.1 Flash）。
+- 每次输出上限，usage 按调用步骤记录；失败不自动重试、不自动启动更多 agent。
 
-打开此仓库，直接说：
+## 启动
 
-- `阅读 Megatron-LM，运行完整 council。`
-- `继续 Megatron-LM。为什么第一个 GEMM 用 column parallelism？`
-- `探索最近两年的 LLM inference scheduling，同时补上经典工作。`
-- `给这篇论文设计一个最小实验，让核心机制变得具体。`
-
-仓库 AGENTS.md 路由到 `.agents/skills/paper-council` 和 `paper-discovery`。
-如果当前任务尚未刷新技能列表，AGENTS.md 仍提供直接文件入口；也可新开任务。
-Skills 规定 protocol，Codex subagents 执行 reasoning，Python 处理确定性操作。
-脚本本身不会调用模型或自动生成论文分析，不需要额外的模型 API key。
-
-## 安装
-
-需要 Python 3.11+ 与 Poppler（pdftotext、pdfinfo、pdftoppm）。
+需要 Python 3.11+、Node.js 22.13+ 和 Poppler。macOS 可用 `brew install poppler` 安装 PDF 工具。
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-# macOS: brew install poppler
-# Ubuntu: sudo apt-get install poppler-utils
+npm ci
+npm run build
+.venv/bin/python -m paper_lab
 ```
 
-若使用 uv：`uv venv .venv`，然后 `uv pip install --python .venv/bin/python -r requirements.txt`。
-网络不可用时解析/下载会显式失败；可使用已核验元数据与用户提供的 PDF。
+打开 http://127.0.0.1:8765，在“工作目录与模型”中输入专用的绝对路径。
+未选择目录时，服务不会创建用户数据。目录必须是空目录或已有 Paper Lab 工作目录，且在 Git 仓库之外。
 
-## 确定性工具
-
-下面是 Codex 可调用的辅助命令，不要求用户日常操作 CLI：
+也可以在启动时明确指定：
 
 ```bash
-.venv/bin/python scripts/resolve_paper.py '1909.08053v4' --output .cache/metadata.yaml
-.venv/bin/python scripts/download_paper.py .cache/metadata.yaml
-.venv/bin/python scripts/create_workspace.py .cache/metadata.yaml --slug megatron-lm-2019 --status reading
-.venv/bin/python scripts/resume_paper.py megatron-lm-2019
-.venv/bin/python scripts/validate_state.py --require-cache
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m paper_lab --data-dir /absolute/path/my-paper-library
 ```
 
-标题查询返回候选，核对作者/年份/venue 后选择，不能把 string similarity 当匹配概率。
-arXiv 从官方 citation metadata 解析并固定版本；DOI 通过 Crossref 解析，arXiv-issued DOI
-会回到 arXiv。普通 URL 支持 citation metadata；无此字段时由 agent 查官方来源补齐。
-Crossref 不保证公开 PDF，agent 优先找 arXiv、作者、会议或 publisher OA 版本。
+目录可通过 `PAPER_LAB_DATA_DIR` 环境变量指定；命令行参数优先。
+切换目录需重启服务。将整个工作目录搬迁后，可从新路径重新打开；备份/搬迁前先停止服务。
 
-```bash
-# 备用公开版本需要说明来源；不绕过登录或 paywall
-.venv/bin/python scripts/download_paper.py .cache/metadata.yaml --pdf-url 'https://example.org/paper.pdf' --access-basis 'author manuscript'
-# 使用本机已有的合法副本
-.venv/bin/python scripts/download_paper.py .cache/metadata.yaml --local-pdf /absolute/path/paper.pdf
-```
+API key 可以在界面中输入（仅保留在当前后端进程），或通过 `DEEPSEEK_API_KEY` 环境变量提供。
+不需要把 key 写进代码、提交 Git 或发到对话中。未配置 key 时可以阅读 PDF 和管理已有笔记。
 
-脚本检查 PDF 内容、页数、文本提取和 SHA256，不以扩展名代替检查。扫描件无法提取时
-显式停止，OCR 不是本版自动能力。公式/图表必须回看渲染页。已有版本不静默覆盖；
-换版需要保留旧状态、逐条重新核验 evidence。DOI 与 arXiv 别名可去重，但两个 provider
-没有声明的身份关联仍需人工核对并补 aliases，不能仅凭相似标题自动合并。
+DeepSeek 默认关闭 thinking，单次输出上限 4096 tokens；可以在设置中修改。
+官方 API ID 为 `deepseek-flash`，不是 `deepseek-v4.1-flash` 或旧版兼容别名。
+模型与 provider 可以切换；更换 API 地址时会清空会话 key，避免将旧 key 发往新地址。
+兼容 provider 当前使用 Chat Completions 协议，图像能力由设置明确声明；不保证兼容所有厂商扩展。
 
-## Council 与长期状态
-
-`resolve → cache → workspace → 4 blind reviews → issue-based cross-review → moderator → scheme`
-
-mechanism、systems、evidence、adversarial 四个 reviewer 使用新上下文，只接收原文、
-角色、reader profile，分别写 memo。并发不足时分批，全部完成后才共享结果。
-这是共享文件系统中的协议隔离，不是权限级沙箱；不能保证不同角色没有模型共同偏差。
-默认一轮交叉审查，必要时第二轮，保留争议。只有主代理分配 C/I/P ID 和写正式状态。
+## 工作目录与代码的边界
 
 ```text
-profile/reader.yaml          未评估知识用 unknown，不复制示例等级
-library/index.yaml          内部阅读索引，非 Zotero 替代品
-library/reading_queue.yaml  已选论文及依赖，允许空队列
-papers/<slug>/source.yaml   身份、固定版本、PDF hash、相对缓存路径
-             claims.yaml   SOURCE / DERIVED / SPECULATION + evidence
-             issues.yaml   争议立场、处理理由与剩余不确定性
-             scheme.md     面向阅读的 mental model，引用 C/I/P
-             prerequisites.yaml / open_questions.md / reading_log.md
-             run.yaml      可恢复阶段与 reviewer provenance
-             debates/      原始独立 memo、交叉审查记录
-discovery/topics.yaml       搜索主题和报告入口
-.cache/papers/             PDF、逐页文本、渲染中间文件（不进 Git）
+用户选择的工作目录/
+  workspace.json       目录与 schema 标记
+  pdfs/<sha256>.pdf     论文实体；不依赖原始下载文件仍在原位
+  library.sqlite3      论文、逐页文字、主题、对话、笔记、usage、设置与进度
+  cache/               导入和渲染的临时文件
 ```
 
-继续讨论默认加载 canonical state，不加载全部历史 debates。只有讨论改变了判断、
-争议或先修需求才更新状态，并记录原因。`CONFIRMED` 只确认 statement 所限定的范围；
-作者报告不等于独立复现，多数同意不等于证据。confidence 为等级+理由，不伪造概率。
-校验器检查结构、引用和 hash，不能替代人工核验“引用的页面是否真支持判断”。
+整个目录都是用户数据，不进入 GitHub。引用包含 PDF hash、页码和归一化选区坐标。
+SQLite 是唯一正式记录；导出的 Markdown 是副本，不做双向同步。
+API 调用会把选区和相关文本发送到所选 provider；本地保存不意味着模型在本地运行。
 
-## Git 与 GitHub
+```text
+paper_lab/             FastAPI、本地数据层、文档处理、上下文、模型接口
+web/src/               React 阅读界面与 PDF.js 交互
+scripts/prepare-web-assets.mjs   打包 PDF.js 字体/CMap/WASM，不依赖远端 CDN
+.agents/skills/         旧版 council/discovery 协议，显式调用时参考
+scripts/*.py           旧版 council CLI；不用于新应用的用户数据
+```
 
-Git 仅保存代码、通用协议和空的初始化模板，不保存用户论文分析、对话或阅读记录。
-旧版脚本仍使用仓库内路径；新版本将支持用户指定的独立数据目录，目前尚未实现。
-在新数据目录接口完成前，不运行真实论文工作流。测试数据目录由用户另行指定。
-远端为 `git@github.com:chai-yinfeng/paper-lab.git`。
+旧版 council 协议保留，但没有接入新 UI。旧 CLI 使用仓库内路径，不要用它运行新的真实阅读任务。
 
-## MVP 边界
+## 开发与验证
 
-不含 Web UI、向量库、Zotero storage parser、自动 OCR、自动全量复现或预读/深读混合模式。
-Discovery 由技能配合可用 web tools 完成，不宣称覆盖整个领域；所有近期结论附检索日期。
-旧版真实论文产出与验收记录已从发布历史移除。
+```bash
+# 终端一：本地后端（未指定目录时保持未配置状态）
+.venv/bin/python -m paper_lab
+# 终端二：界面开发，/api 自动转发到本地后端
+npm run dev
+
+# 无磁盘工作目录、无真实模型的内存测试
+.venv/bin/python -m unittest discover -s tests -p test_app.py -v
+npm run build
+```
+
+实际 PDF 导入、图文选区对齐、下载、持久化重启和真实 API 联调，需要用户指定临时工作目录后进行。
+目前构建与内存 API 测试通过，不代表上述真实文件流程已经验收。详见 [架构与验证边界](docs/architecture/local-reader.md)。

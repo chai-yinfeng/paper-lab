@@ -12,7 +12,11 @@ __pycache__/
 htmlcov/
 .paper-lab.lock
 *.tmp
-
-# User paper outputs must not enter source control.
 /papers/
 /data/
+node_modules/
+dist/
+.sites-runtime/
+*.sqlite*
+*.db
+/web/public/pdf-assets/
