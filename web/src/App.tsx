@@ -1044,13 +1044,20 @@ export default function App() {
             autoComplete="off"
             value={key}
             placeholder={
-              status?.key_configured ? "已配置，留空保持" : "稍后配置也可以"
+              status?.key_configured
+                ? status.key_storage === "keychain"
+                  ? "已保存在 macOS Keychain，留空保持"
+                  : status.key_storage === "environment"
+                    ? "已通过环境变量配置，留空保持"
+                    : "Keychain 暂不可用，可重新保存"
+                : "稍后配置也可以"
             }
             onChange={(e) => setKey(e.target.value)}
           />
         </label>
         <p className="small muted">
-          key 仅保留在当前服务进程中，不写入工作目录或浏览器存储。API
+          在这里保存的 key 会进入 macOS
+          Keychain，进程重启后仍可使用；不会写入工作目录、 Git 或浏览器存储。API
           调用会发送相关原文与所选图像。
         </p>
         {status && !status.poppler_ready && (

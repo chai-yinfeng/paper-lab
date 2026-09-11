@@ -39,8 +39,9 @@ npm run build
 目录可通过 `PAPER_LAB_DATA_DIR` 环境变量指定；命令行参数优先。
 切换目录需重启服务。将整个工作目录搬迁后，可从新路径重新打开；备份/搬迁前先停止服务。
 
-API key 可以在界面中输入（仅保留在当前后端进程），或通过 `DEEPSEEK_API_KEY` 环境变量提供。
-不需要把 key 写进代码、提交 Git 或发到对话中。未配置 key 时可以阅读 PDF 和管理已有笔记。
+API key 可以在界面中输入并持久保存在 macOS Keychain，或通过 `DEEPSEEK_API_KEY`
+环境变量提供。它不会写入工作目录、浏览器存储或 Git，也不会从状态接口返回。
+未配置 key 时可以阅读 PDF 和管理已有笔记。
 
 DeepSeek 默认关闭 thinking，单次输出上限 4096 tokens；可以在设置中修改。
 官方 API ID 为 `deepseek-flash`，不是 `deepseek-v4.1-flash` 或旧版兼容别名。

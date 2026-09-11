@@ -20,6 +20,8 @@ from starlette.concurrency import run_in_threadpool
 
 from .context import build_context
 from .documents import MAX_PDF, crop, import_pdf, validate_anchor
+from .keychain import get_key as keychain_get
+from .keychain import set_key as keychain_set
 from .providers import ProviderSettings, stream_completion
 from .search import download, search
 from .store import decoded, stamp, uid
@@ -39,8 +41,13 @@ def create_app():
     app = FastAPI(title="Paper Lab", lifespan=lifespan)
     app.state.workspace = None
     app.state.token = secrets.token_urlsafe(32)
-    app.state.key = os.getenv("DEEPSEEK_API_KEY", "")
-    app.state.key_target = ("deepseek", "https://api.deepseek.com")
+    environment_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    app.state.key_cache = {}
+    if environment_key:
+        app.state.key_cache[("deepseek", "https://api.deepseek.com")] = (
+            environment_key,
+            "environment",
+        )
     app.state.active = set()
     app.state.stream_tasks = {}
     app.state.configure_lock = asyncio.Lock()
@@ -95,12 +102,16 @@ def create_app():
             **ws().store.setting("provider", ProviderSettings().model_dump())
         )
 
-    def key_ready(settings):
-        return bool(
-            app.state.key
-            and app.state.key_target
-            == (settings.provider, settings.base_url.rstrip("/"))
-        )
+    def credential(settings):
+        target = (settings.provider, settings.base_url.rstrip("/"))
+        if target not in app.state.key_cache:
+            try:
+                value = keychain_get(*target)
+                source = "keychain" if value else "none"
+            except ValueError:
+                value, source = None, "unavailable"
+            app.state.key_cache[target] = (value, source)
+        return app.state.key_cache[target]
 
     def paper(paper_id):
         return ws().store.one("SELECT * FROM papers WHERE id=?", (paper_id,))
@@ -112,12 +123,14 @@ def create_app():
     def status():
         w = app.state.workspace
         settings = provider() if w else ProviderSettings()
+        _, key_storage = credential(settings)
         return {
             "configured": bool(w),
             "data_dir": str(w.root) if w else None,
             "token": app.state.token,
             "provider": settings.model_dump(),
-            "key_configured": key_ready(settings),
+            "key_configured": key_storage != "none",
+            "key_storage": key_storage,
             "poppler_ready": bool(
                 shutil.which("pdftotext") and shutil.which("pdftoppm")
             ),
@@ -141,21 +154,16 @@ def create_app():
 
     @app.put("/api/provider")
     def update_provider(body: ProviderSettings):
-        previous = provider()
-        if (body.provider, body.base_url.rstrip("/")) != (
-            previous.provider,
-            previous.base_url.rstrip("/"),
-        ):
-            app.state.key = ""
         ws().store.set_setting("provider", body.model_dump())
         return status()
 
     @app.put("/api/key")
     def update_key(body: Key):
         settings = provider()
-        app.state.key = body.key.strip()
-        app.state.key_target = (settings.provider, settings.base_url.rstrip("/"))
-        return {"key_configured": key_ready(settings)}
+        target = (settings.provider, settings.base_url.rstrip("/"))
+        keychain_set(*target, body.key)
+        app.state.key_cache[target] = (body.key.strip(), "keychain")
+        return {"key_configured": True, "key_storage": "keychain"}
 
     @app.get("/api/session")
     def session():
@@ -295,7 +303,8 @@ def create_app():
         t = thread(thread_id)
         p = paper(t["paper_id"])
         settings = provider()
-        if not key_ready(settings):
+        key, _ = credential(settings)
+        if not key:
             raise ValueError("请先为当前 provider 配置 API key。")
         if thread_id in app.state.active:
             raise ValueError("这个主题正在生成回答，请等待或停止后再试。")
@@ -377,8 +386,6 @@ def create_app():
         except BaseException:
             app.state.active.discard(thread_id)
             raise
-        key = app.state.key
-
         async def events():
             app.state.stream_tasks[thread_id] = asyncio.current_task()
             output = ""

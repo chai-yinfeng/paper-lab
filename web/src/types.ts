@@ -50,6 +50,7 @@ export type Status = {
   configured: boolean;
   data_dir: string | null;
   key_configured: boolean;
+  key_storage: "keychain" | "environment" | "none" | "unavailable";
   token: string;
   poppler_ready: boolean;
   provider: Provider;

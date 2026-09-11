@@ -12,6 +12,8 @@ import httpx
 from paper_lab.api import create_app
 from paper_lab.context import build_context
 from paper_lab.documents import validate_anchor, import_pdf
+from paper_lab.keychain import get_key as keychain_get
+from paper_lab.keychain import set_key as keychain_set
 from paper_lab.providers import ProviderSettings, payload, stream_completion
 from paper_lab.store import Store, stamp
 from paper_lab.workspace import Workspace, REPO
@@ -97,13 +99,20 @@ class ContextTests(unittest.TestCase):
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.keychain_get = patch("paper_lab.api.keychain_get", return_value=None)
+        self.keychain_set = patch("paper_lab.api.keychain_set")
+        self.keychain_get.start()
+        self.keychain_set.start()
         self.app = create_app()
         self.db = Store(":memory:")
         seed(self.db)
         self.app.state.workspace = SimpleNamespace(
             store=self.db, root=Path("/not-created")
         )
-        self.app.state.key = "test-placeholder-not-a-real-key"
+        self.app.state.key_cache[("deepseek", "https://api.deepseek.com")] = (
+            "test-placeholder-not-a-real-key",
+            "keychain",
+        )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app),
             base_url="http://testserver",
@@ -113,6 +122,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
         self.db.close()
+        self.keychain_set.stop()
+        self.keychain_get.stop()
 
     async def test_notes_require_explicit_save_and_remain_editable(self):
         self.db.execute(
@@ -180,7 +191,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_missing_key_does_not_create_message_or_run(self):
-        self.app.state.key = ""
+        self.app.state.key_cache[("deepseek", "https://api.deepseek.com")] = (
+            None,
+            "none",
+        )
         r = await self.client.post(
             "/api/threads/topic/messages", json={"question": "Explain"}
         )
@@ -209,6 +223,17 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(r.json()["key_configured"])
         self.assertNotIn(
             "test-placeholder", json.dumps(self.db.all("SELECT * FROM settings"))
+        )
+
+    async def test_api_key_is_saved_to_keychain_not_sqlite(self):
+        key = "test-key-that-is-never-sent"
+        response = await self.client.put("/api/key", json={"key": key})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["key_storage"], "keychain")
+        self.assertNotIn(key, json.dumps(self.db.all("SELECT * FROM settings")))
+        self.assertEqual(
+            self.app.state.key_cache[("deepseek", "https://api.deepseek.com")],
+            (key, "keychain"),
         )
 
     async def test_native_directory_picker_returns_path_or_cancel(self):
@@ -377,6 +402,31 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(move.call_count, 1)
         self.assertEqual(
             len(self.db.all("SELECT * FROM pages WHERE paper_id=?", (first["id"],))), 1
+        )
+
+
+class KeychainTests(unittest.TestCase):
+    @patch("paper_lab.keychain.platform.system", return_value="Darwin")
+    @patch("paper_lab.keychain.subprocess.run")
+    def test_secret_is_sent_over_stdin_not_process_arguments(self, run, _system):
+        run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        keychain_set("deepseek", "https://api.deepseek.com", "secret-value")
+        args = run.call_args.args[0]
+        self.assertNotIn("secret-value", args)
+        self.assertEqual(
+            run.call_args.kwargs["input"], "secret-value\nsecret-value\n"
+        )
+        self.assertEqual(args[-1], "-w")
+
+    @patch("paper_lab.keychain.platform.system", return_value="Darwin")
+    @patch("paper_lab.keychain.subprocess.run")
+    def test_saved_key_can_be_loaded_after_restart(self, run, _system):
+        run.return_value = SimpleNamespace(
+            returncode=0, stdout="persisted-secret\n", stderr=""
+        )
+        self.assertEqual(
+            keychain_get("deepseek", "https://api.deepseek.com"),
+            "persisted-secret",
         )
 
 
