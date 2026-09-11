@@ -22,6 +22,7 @@ from .context import build_context
 from .documents import MAX_PDF, crop, import_pdf, validate_anchor
 from .keychain import get_key as keychain_get
 from .keychain import set_key as keychain_set
+from .preferences import recent_workspace, remember_workspace
 from .providers import ProviderSettings, stream_completion
 from .search import download, search
 from .store import decoded, stamp, uid
@@ -31,9 +32,13 @@ from .workspace import REPO, Workspace, pick_directory
 def create_app():
     @asynccontextmanager
     async def lifespan(app):
-        directory = os.getenv("PAPER_LAB_DATA_DIR")
+        directory = os.getenv("PAPER_LAB_DATA_DIR") or recent_workspace()
         if directory:
-            app.state.workspace = Workspace(directory)
+            try:
+                app.state.workspace = Workspace(directory)
+            except ValueError:
+                if os.getenv("PAPER_LAB_DATA_DIR"):
+                    raise
         yield
         if app.state.workspace:
             app.state.workspace.store.close()
@@ -144,6 +149,9 @@ def create_app():
                     "工作目录已打开。切换目录请重启服务，避免打断进行中的阅读。"
                 )
             app.state.workspace = await run_in_threadpool(Workspace, body.path)
+            await run_in_threadpool(
+                remember_workspace, str(app.state.workspace.root)
+            )
         return status()
 
     @app.post("/api/workspace/pick")

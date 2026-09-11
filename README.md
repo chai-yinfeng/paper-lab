@@ -30,6 +30,22 @@ uv run --locked python -m paper_lab
 原生目录选择器；也可以直接输入专用的绝对路径。
 未选择目录时，服务不会创建用户数据。目录必须是空目录或已有 Paper Lab 工作目录，且在 Git 仓库之外。
 
+### macOS launcher
+
+构建并安装 menu bar launcher：
+
+```bash
+scripts/build-macos-app.sh "$HOME/Applications/Paper Lab.app"
+open "$HOME/Applications/Paper Lab.app"
+```
+
+启动后，菜单栏中的 Paper Lab 图标可用于打开、启动、停止或重启服务，以及查看
+`~/Library/Logs/Paper Lab/server.log`。退出 launcher 会停止由它启动的服务。
+launcher 记录构建时的仓库路径；仓库移动后重新运行安装命令即可。
+最近打开的有效工作目录记录在
+`~/Library/Application Support/Paper Lab/launcher.json`，重启时会自动恢复；
+只有已经包含 Paper Lab workspace marker 的目录才会被自动打开。
+
 也可以在启动时明确指定：
 
 ```bash

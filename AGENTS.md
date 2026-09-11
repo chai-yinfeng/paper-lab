@@ -12,6 +12,8 @@ Use Chinese explanations; retain English technical terms, equations and necessar
 
 ## User data
 - A user-selected data directory outside Git holds PDFs, conversations, notes, usage and reading state.
+- The last selected workspace path may be stored in machine-local launcher preferences so a
+  restart can reopen it, but only an existing directory with a valid Paper Lab marker is eligible.
 - No implicit data directory creation. For file/PDF acceptance tests, wait for the user to supply a temporary directory.
 - In-memory unit tests and an unconfigured UI preview may run without a data directory or API key.
 - Never commit real paper outputs, reader profiles, conversations, keys, databases or PDF caches.

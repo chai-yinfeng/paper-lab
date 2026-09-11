@@ -3,6 +3,8 @@
 import json
 import asyncio
 import io
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ from paper_lab.documents import validate_anchor, import_pdf
 from paper_lab.keychain import SERVICE
 from paper_lab.keychain import get_key as keychain_get
 from paper_lab.keychain import set_key as keychain_set
+from paper_lab.preferences import recent_workspace, remember_workspace
 from paper_lab.providers import ProviderSettings, payload, stream_completion
 from paper_lab.store import Store, stamp
 from paper_lab.workspace import Workspace, REPO
@@ -432,6 +435,22 @@ class KeychainTests(unittest.TestCase):
             keychain_get("deepseek", "https://api.deepseek.com"),
             "persisted-secret",
         )
+
+
+class PreferencesTests(unittest.TestCase):
+    def test_only_a_marked_recent_workspace_is_restored(self):
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root) / "config"
+            workspace = Path(root) / "papers"
+            workspace.mkdir()
+            (workspace / "workspace.json").write_text(
+                json.dumps({"schema_version": 1, "application": "paper-lab"})
+            )
+            with patch.dict(os.environ, {"PAPER_LAB_CONFIG_DIR": str(config)}):
+                remember_workspace(str(workspace))
+                self.assertEqual(recent_workspace(), str(workspace.resolve()))
+                (workspace / "workspace.json").write_text("{}")
+                self.assertIsNone(recent_workspace())
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):

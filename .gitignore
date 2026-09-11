@@ -16,6 +16,7 @@ htmlcov/
 /data/
 node_modules/
 dist/
+/build/
 .sites-runtime/
 *.sqlite*
 *.db
