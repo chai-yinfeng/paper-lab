@@ -65,6 +65,12 @@ select:focus-visible {
   height: 100dvh;
   overflow: hidden;
 }
+.app.library-collapsed {
+  grid-template-columns: minmax(320px, 1fr) 410px;
+}
+.library-collapsed .library {
+  display: none;
+}
 .library {
   background: #f0f2ed;
   border-right: 1px solid #dce1d9;
@@ -286,6 +292,9 @@ label select {
   .app {
     grid-template-columns: 180px minmax(280px, 1fr) 350px;
   }
+  .app.library-collapsed {
+    grid-template-columns: minmax(280px, 1fr) 350px;
+  }
   .library {
     padding: 20px 12px;
   }
@@ -302,6 +311,9 @@ label select {
     height: auto;
     min-height: 100dvh;
     overflow: auto;
+  }
+  .app.library-collapsed {
+    grid-template-columns: 1fr;
   }
   .library {
     border-right: 0;
@@ -377,12 +389,6 @@ button.icon {
   font-size: 12px;
   color: #88917f;
   margin-top: 6px;
-}
-.library-collapsed {
-  grid-template-columns: 0 minmax(320px, 1fr) 410px;
-}
-.library-collapsed .library {
-  display: none;
 }
 .error-banner {
   background: #fff0e9;
