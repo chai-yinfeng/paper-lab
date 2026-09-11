@@ -22,8 +22,7 @@ final class PaperLabLauncher: NSObject, NSApplicationDelegate {
     private var openWhenReady = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        installAppIcon()
+        NSApp.setActivationPolicy(.accessory)
         makeMenu()
         probe { [weak self] running in
             guard let self else { return }
@@ -76,35 +75,6 @@ final class PaperLabLauncher: NSObject, NSApplicationDelegate {
         menu.addItem(menuItem("退出 Paper Lab", #selector(quit), "q"))
         statusItem.menu = menu
         setStatus("正在检查…", owned: false, running: false)
-    }
-
-    private func installAppIcon() {
-        let size = NSSize(width: 512, height: 512)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor(calibratedRed: 0.19, green: 0.29, blue: 0.24, alpha: 1).setFill()
-        NSBezierPath(
-            roundedRect: NSRect(x: 28, y: 28, width: 456, height: 456),
-            xRadius: 104,
-            yRadius: 104
-        ).fill()
-        if let symbol = NSImage(
-            systemSymbolName: "doc.text.magnifyingglass",
-            accessibilityDescription: "Paper Lab"
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 255, weight: .medium)
-        ) {
-            symbol.isTemplate = true
-            NSColor.white.set()
-            symbol.draw(
-                in: NSRect(x: 118, y: 118, width: 276, height: 276),
-                from: .zero,
-                operation: .sourceOver,
-                fraction: 1
-            )
-        }
-        image.unlockFocus()
-        NSApp.applicationIconImage = image
     }
 
     private func menuItem(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
