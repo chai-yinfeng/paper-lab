@@ -1,0 +1,18 @@
+.cache/
+.venv/
+__pycache__/
+*.py[cod]
+*.pdf
+.DS_Store
+.env
+.env.*
+!.env.example
+*.egg-info/
+.coverage
+htmlcov/
+.paper-lab.lock
+*.tmp
+
+# User paper outputs must not enter source control.
+/papers/
+/data/

@@ -1,0 +1,14 @@
+schema_version: 1
+language: zh-CN
+preserve_original_terms: true
+default_workflow: full-council
+knowledge:
+  probability: {level: unknown, basis: not_assessed}
+  optimization: {level: unknown, basis: not_assessed}
+  deep_learning: {level: unknown, basis: not_assessed}
+  transformers: {level: unknown, basis: not_assessed}
+  llm_inference: {level: unknown, basis: not_assessed}
+  cuda: {level: unknown, basis: not_assessed}
+  distributed_systems: {level: unknown, basis: not_assessed}
+  distributed_training: {level: unknown, basis: not_assessed}
+  networking: {level: unknown, basis: not_assessed}
