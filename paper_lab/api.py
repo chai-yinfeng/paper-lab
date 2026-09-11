@@ -123,13 +123,13 @@ def create_app():
     def status():
         w = app.state.workspace
         settings = provider() if w else ProviderSettings()
-        _, key_storage = credential(settings)
+        key, key_storage = credential(settings)
         return {
             "configured": bool(w),
             "data_dir": str(w.root) if w else None,
             "token": app.state.token,
             "provider": settings.model_dump(),
-            "key_configured": key_storage != "none",
+            "key_configured": bool(key),
             "key_storage": key_storage,
             "poppler_ready": bool(
                 shutil.which("pdftotext") and shutil.which("pdftoppm")

@@ -12,6 +12,7 @@ import httpx
 from paper_lab.api import create_app
 from paper_lab.context import build_context
 from paper_lab.documents import validate_anchor, import_pdf
+from paper_lab.keychain import SERVICE
 from paper_lab.keychain import get_key as keychain_get
 from paper_lab.keychain import set_key as keychain_set
 from paper_lab.providers import ProviderSettings, payload, stream_completion
@@ -417,6 +418,9 @@ class KeychainTests(unittest.TestCase):
             run.call_args.kwargs["input"], "secret-value\nsecret-value\n"
         )
         self.assertEqual(args[-1], "-w")
+        self.assertEqual(args[args.index("-s") + 1], SERVICE)
+        self.assertEqual(SERVICE, "com.chai-yinfeng.paper-lab.api-key")
+        self.assertTrue(args[args.index("-a") + 1].startswith("deepseek:api.deepseek.com:"))
 
     @patch("paper_lab.keychain.platform.system", return_value="Darwin")
     @patch("paper_lab.keychain.subprocess.run")

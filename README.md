@@ -16,14 +16,14 @@
 
 ## 启动
 
-需要 Python 3.11+、Node.js 22.13+ 和 Poppler。macOS 可用 `brew install poppler` 安装 PDF 工具。
+需要 uv、Python 3.11+、Node.js 22.13+ 和 Poppler。macOS 可用
+`brew install uv poppler` 安装环境管理器和 PDF 工具。
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+uv sync --locked
 npm ci
 npm run build
-.venv/bin/python -m paper_lab
+uv run --locked python -m paper_lab
 ```
 
 打开 http://127.0.0.1:8765，在“工作目录与模型”中使用“选择文件夹…”打开 macOS
@@ -33,14 +33,15 @@ npm run build
 也可以在启动时明确指定：
 
 ```bash
-.venv/bin/python -m paper_lab --data-dir /absolute/path/my-paper-library
+uv run --locked python -m paper_lab --data-dir /absolute/path/my-paper-library
 ```
 
 目录可通过 `PAPER_LAB_DATA_DIR` 环境变量指定；命令行参数优先。
 切换目录需重启服务。将整个工作目录搬迁后，可从新路径重新打开；备份/搬迁前先停止服务。
 
 API key 可以在界面中输入并持久保存在 macOS Keychain，或通过 `DEEPSEEK_API_KEY`
-环境变量提供。它不会写入工作目录、浏览器存储或 Git，也不会从状态接口返回。
+环境变量提供。Keychain 项使用 Paper Lab 独占的 service，并按 provider 与 API 地址分开，
+不会与其他应用保存的 DeepSeek key 混淆。它不会写入工作目录、浏览器存储或 Git，也不会从状态接口返回。
 未配置 key 时可以阅读 PDF 和管理已有笔记。
 
 DeepSeek 默认关闭 thinking，单次输出上限 4096 tokens；可以在设置中修改。
@@ -76,12 +77,12 @@ scripts/*.py           旧版 council CLI；不用于新应用的用户数据
 
 ```bash
 # 终端一：本地后端（未指定目录时保持未配置状态）
-.venv/bin/python -m paper_lab
+uv run --locked python -m paper_lab
 # 终端二：界面开发，/api 自动转发到本地后端
 npm run dev
 
 # 无磁盘工作目录、无真实模型的内存测试
-.venv/bin/python -m unittest discover -s tests -p test_app.py -v
+uv run --locked python -m unittest discover -s tests -p test_app.py -v
 npm run build
 ```
 

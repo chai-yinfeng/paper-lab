@@ -1,0 +1,16 @@
+[project]
+name = "paper-lab"
+version = "0.2.0"
+description = "A local, API-powered workspace for reading and discussing research papers."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "python-multipart==0.0.32",
+    "PyYAML==6.0.2",
+    "uvicorn==0.52.4",
+]
+
+[tool.uv]
+package = false
