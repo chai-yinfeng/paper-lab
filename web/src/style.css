@@ -61,7 +61,9 @@ select:focus-visible {
 }
 .app {
   display: grid;
-  grid-template-columns: 225px minmax(320px, 1fr) 410px;
+  grid-template-columns:
+    var(--library-width, 225px) 6px minmax(320px, 1fr) 6px
+    var(--discussion-width, 410px);
   height: 100dvh;
   overflow: hidden;
 }
@@ -70,7 +72,10 @@ select:focus-visible {
   height: 100%;
 }
 .app.library-collapsed {
-  grid-template-columns: minmax(320px, 1fr) 410px;
+  grid-template-columns: 0 0 minmax(320px, 1fr) 6px var(
+      --discussion-width,
+      410px
+    );
 }
 .library-collapsed .library {
   display: none;
@@ -226,7 +231,7 @@ select:focus-visible {
 .composer textarea {
   width: 100%;
   min-height: 70px;
-  resize: vertical;
+  resize: none;
   border: 0;
   background: transparent;
   outline: none;
@@ -300,10 +305,15 @@ label select {
 }
 @media (max-width: 1100px) {
   .app {
-    grid-template-columns: 180px minmax(280px, 1fr) 350px;
+    grid-template-columns:
+      var(--library-width, 180px) 6px minmax(280px, 1fr) 6px
+      var(--discussion-width, 350px);
   }
   .app.library-collapsed {
-    grid-template-columns: minmax(280px, 1fr) 350px;
+    grid-template-columns: 0 0 minmax(280px, 1fr) 6px var(
+        --discussion-width,
+        350px
+      );
   }
   .library {
     padding: 20px 12px;
@@ -324,6 +334,9 @@ label select {
   }
   .app.library-collapsed {
     grid-template-columns: 1fr;
+  }
+  .resize-handle {
+    display: none;
   }
   .library {
     border-right: 0;
@@ -603,6 +616,23 @@ a {
   background: transparent;
   font-size: 12px;
   color: #63765a;
+}
+.composer .composer-controls {
+  justify-content: flex-start;
+  gap: 5px;
+}
+.composer .composer-controls > button:last-child {
+  margin-left: auto;
+}
+.composer .composer-controls .workflow-info {
+  margin-left: 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #63765a;
+}
+.composer .composer-controls .workflow-info:hover:not(:disabled) {
+  background: #e9eee5;
 }
 .composer .composer-meta {
   margin-top: 10px;
@@ -970,7 +1000,10 @@ hr {
 }
 @media (max-width: 1100px) {
   .library-collapsed {
-    grid-template-columns: 0 minmax(280px, 1fr) 350px;
+    grid-template-columns: 0 0 minmax(280px, 1fr) 6px var(
+        --discussion-width,
+        350px
+      );
   }
   .message {
     padding: 20px;
@@ -992,6 +1025,9 @@ hr {
   .app,
   .library-collapsed {
     grid-template-columns: 1fr;
+  }
+  .resize-handle {
+    display: none;
   }
   .library-collapsed .library {
     display: none;
@@ -1139,6 +1175,51 @@ hr {
   background: #f0f4e9;
   color: #52684b;
   font-size: 13px;
+}
+.resize-handle {
+  position: relative;
+  z-index: 5;
+  width: 6px;
+  min-width: 6px;
+  background: #e4e8e1;
+  cursor: col-resize;
+  touch-action: none;
+  transition: background 120ms ease;
+}
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.resize-handle:hover,
+.resize-handle:focus-visible,
+body.resizing-columns .resize-handle {
+  background: #91a48b;
+  outline: none;
+}
+.resize-handle.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+body.resizing-columns {
+  cursor: col-resize;
+  user-select: none;
+}
+.workflow-dialog article {
+  padding: 14px 16px;
+  margin: 12px 0;
+  border: 1px solid #dce5d7;
+  border-radius: 9px;
+  background: #f8faf6;
+}
+.workflow-dialog article h3 {
+  margin: 0 0 5px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workflow-dialog article p {
+  margin: 0;
+  color: #5f6f60;
 }
 .context-jump {
   margin: 0 12px 10px;

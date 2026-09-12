@@ -18,6 +18,7 @@ import {
   Pencil,
   Trash2,
   Sparkles,
+  Info,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -58,12 +59,33 @@ export default function App() {
     [phase, setPhase] = useState(""),
     [context, setContext] = useState<Context | null>(null),
     [busy, setBusy] = useState(false),
-    [collapsed, setCollapsed] = useState(false);
+    [collapsed, setCollapsed] = useState(false),
+    [libraryWidth, setLibraryWidth] = useState(() =>
+      Math.min(
+        360,
+        Math.max(
+          160,
+          Number(localStorage.getItem("paper-lab-library-width")) || 225,
+        ),
+      ),
+    ),
+    [discussionWidth, setDiscussionWidth] = useState(() =>
+      Math.min(
+        720,
+        Math.max(
+          300,
+          Number(localStorage.getItem("paper-lab-discussion-width")) || 410,
+        ),
+      ),
+    );
   const settings = useRef<HTMLDialogElement>(null),
     importDialog = useRef<HTMLDialogElement>(null),
     noteDialog = useRef<HTMLDialogElement>(null),
     topicDialog = useRef<HTMLDialogElement>(null),
     contextDialog = useRef<HTMLDialogElement>(null),
+    workflowDialog = useRef<HTMLDialogElement>(null),
+    layout = useRef<HTMLDivElement>(null),
+    composing = useRef(false),
     bottom = useRef<HTMLDivElement>(null);
   const [directory, setDirectory] = useState(
       () => localStorage.getItem("paper-lab-directory") || "",
@@ -586,13 +608,78 @@ export default function App() {
       setAnchor(n.anchor?.page === targetPage ? n.anchor : null);
     }
   }
+  function resizeBy(side: "library" | "discussion", delta: number) {
+    const root = layout.current;
+    if (!root) return;
+    const available = root.clientWidth - 390 - 12;
+    if (side === "library") {
+      const maximum = Math.max(160, Math.min(360, available - discussionWidth));
+      const next = Math.min(maximum, Math.max(160, libraryWidth + delta));
+      setLibraryWidth(next);
+      localStorage.setItem("paper-lab-library-width", String(next));
+    } else {
+      const usedLeft = collapsed ? 0 : libraryWidth;
+      const maximum = Math.max(300, Math.min(720, available - usedLeft));
+      const next = Math.min(maximum, Math.max(300, discussionWidth - delta));
+      setDiscussionWidth(next);
+      localStorage.setItem("paper-lab-discussion-width", String(next));
+    }
+  }
+  function startResize(
+    side: "library" | "discussion",
+    event: React.PointerEvent<HTMLDivElement>,
+  ) {
+    if (window.innerWidth <= 800) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = side === "library" ? libraryWidth : discussionWidth;
+    const root = layout.current!;
+    const available = root.clientWidth - 390 - 12;
+    const usedLeft = collapsed ? 0 : libraryWidth;
+    document.body.classList.add("resizing-columns");
+    const move = (e: PointerEvent) => {
+      const total = e.clientX - startX;
+      if (side === "library") {
+        const maximum = Math.max(
+          160,
+          Math.min(360, available - discussionWidth),
+        );
+        const next = Math.min(maximum, Math.max(160, startWidth + total));
+        setLibraryWidth(next);
+        localStorage.setItem("paper-lab-library-width", String(next));
+      } else {
+        const maximum = Math.max(300, Math.min(720, available - usedLeft));
+        const next = Math.min(maximum, Math.max(300, startWidth - total));
+        setDiscussionWidth(next);
+        localStorage.setItem("paper-lab-discussion-width", String(next));
+      }
+    };
+    const stop = () => {
+      document.body.classList.remove("resizing-columns");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", stop, { once: true });
+  }
   const dialogError = error && (
     <div role="alert" className="inline-error">
       {error}
     </div>
   );
   return (
-    <div className={"app" + (collapsed ? " library-collapsed" : "")}>
+    <div
+      ref={layout}
+      className={"app" + (collapsed ? " library-collapsed" : "")}
+      style={
+        {
+          "--library-width": `${libraryWidth}px`,
+          "--discussion-width": `${discussionWidth}px`,
+        } as React.CSSProperties
+      }
+    >
       <aside className="library">
         <div className="brand">
           <BookOpen size={22} /> paper lab <span>本地</span>
@@ -643,6 +730,13 @@ export default function App() {
           <Settings size={16} /> 工作目录与模型
         </button>
       </aside>
+      <ResizeHandle
+        label="调整论文列表宽度"
+        value={libraryWidth}
+        hidden={collapsed}
+        onPointerDown={(e) => startResize("library", e)}
+        onKey={(delta) => resizeBy("library", delta)}
+      />
       <main className="reader">
         <header>
           <button
@@ -704,6 +798,12 @@ export default function App() {
           </div>
         )}
       </main>
+      <ResizeHandle
+        label="调整对话栏宽度"
+        value={discussionWidth}
+        onPointerDown={(e) => startResize("discussion", e)}
+        onKey={(delta) => resizeBy("discussion", delta)}
+      />
       <aside className="discussion">
         <header>
           <button
@@ -948,11 +1048,19 @@ export default function App() {
                 disabled={!paper || generating}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
+                onCompositionStart={() => {
+                  composing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composing.current = false;
+                }}
                 onKeyDown={(e) => {
                   if (
                     e.key === "Enter" &&
                     !e.shiftKey &&
-                    !e.nativeEvent.isComposing
+                    !composing.current &&
+                    !e.nativeEvent.isComposing &&
+                    e.nativeEvent.keyCode !== 229
                   ) {
                     e.preventDefault();
                     void send();
@@ -966,11 +1074,18 @@ export default function App() {
                   value={workflow}
                   onChange={(e) => setWorkflow(e.target.value)}
                 >
-                  <option value="specialist">Specialist · 1 次调用</option>
-                  <option value="reader-checker">
-                    Reader + Checker · 最多 2 次
-                  </option>
+                  <option value="specialist">Specialist</option>
+                  <option value="reader-checker">Reader + Checker</option>
                 </select>
+                <button
+                  type="button"
+                  className="workflow-info"
+                  aria-label="了解阅读策略"
+                  title="了解阅读策略"
+                  onClick={() => workflowDialog.current?.showModal()}
+                >
+                  <Info size={16} />
+                </button>
                 {generating ? (
                   <button
                     onClick={() => void stopGeneration()}
@@ -1403,7 +1518,60 @@ export default function App() {
           </>
         )}
       </dialog>
+      <dialog className="workflow-dialog" ref={workflowDialog}>
+        <DialogTitle
+          title="阅读策略"
+          close={() => workflowDialog.current?.close()}
+        />
+        <article>
+          <h3>Specialist</h3>
+          <p>
+            直接围绕选区、问题和补充原文解释机制、前提与容易遗漏的细节。适合已经被验证的论文、日常精读和连续追问，响应更快、成本更低。
+          </p>
+        </article>
+        <article>
+          <h3>Reader + Checker</h3>
+          <p>
+            Reader 先形成解释，Checker
+            再对照同一批原文检查事实错误、遗漏和前提。适合最新结果、证据链复杂或你希望额外审查的内容，会使用更多时间与模型额度。
+          </p>
+        </article>
+        <p className="small muted">
+          两种策略都只使用“查看将发送的原文”中列出的论文内容；回答不会自动写入笔记。
+        </p>
+      </dialog>
     </div>
+  );
+}
+function ResizeHandle({
+  label,
+  value,
+  hidden = false,
+  onPointerDown,
+  onKey,
+}: {
+  label: string;
+  value: number;
+  hidden?: boolean;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onKey: (delta: number) => void;
+}) {
+  return (
+    <div
+      className={"resize-handle" + (hidden ? " hidden" : "")}
+      role="separator"
+      aria-label={label}
+      aria-orientation="vertical"
+      aria-valuenow={Math.round(value)}
+      tabIndex={hidden ? -1 : 0}
+      onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          onKey(e.key === "ArrowRight" ? 12 : -12);
+        }
+      }}
+    />
   );
 }
 function DialogTitle({ title, close }: { title: string; close: () => void }) {
