@@ -19,6 +19,7 @@ import {
   Trash2,
   Sparkles,
   Info,
+  Tags,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -36,6 +37,7 @@ import type {
   Context,
   Run,
   Candidate,
+  ExternalSource,
 } from "./types";
 import "./style.css";
 
@@ -55,6 +57,7 @@ export default function App() {
     [tab, setTab] = useState<"chat" | "notes">("chat"),
     [question, setQuestion] = useState(""),
     [workflow, setWorkflow] = useState("specialist"),
+    [academicSearch, setAcademicSearch] = useState(false),
     [generating, setGenerating] = useState(false),
     [phase, setPhase] = useState(""),
     [context, setContext] = useState<Context | null>(null),
@@ -93,6 +96,8 @@ export default function App() {
     topicDialog = useRef<HTMLDialogElement>(null),
     contextDialog = useRef<HTMLDialogElement>(null),
     workflowDialog = useRef<HTMLDialogElement>(null),
+    sourceDialog = useRef<HTMLDialogElement>(null),
+    paperDialog = useRef<HTMLDialogElement>(null),
     layout = useRef<HTMLDivElement>(null),
     discussion = useRef<HTMLElement>(null),
     bottom = useRef<HTMLDivElement>(null);
@@ -115,7 +120,13 @@ export default function App() {
     [noteText, setNoteText] = useState(""),
     [noteSource, setNoteSource] = useState<Message | Note | null>(null),
     [editingNote, setEditingNote] = useState(false);
-  const [editingTopic, setEditingTopic] = useState(false);
+  const [editingTopic, setEditingTopic] = useState(false),
+    [externalSource, setExternalSource] = useState<ExternalSource | null>(null),
+    [preparedExternal, setPreparedExternal] = useState<{
+      key: string;
+      sources: ExternalSource[];
+    } | null>(null),
+    [paperTags, setPaperTags] = useState("");
   const abort = useRef<AbortController | null>(null),
     epoch = useRef(0),
     messageEpoch = useRef(0),
@@ -378,6 +389,48 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function savePaperTags() {
+    if (!paper) return;
+    setBusy(true);
+    try {
+      const updated = await api<Paper>(`/papers/${paper.id}/tags`, "PUT", {
+        tags: paperTags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      });
+      setPaper(updated);
+      setPapers((old) => old.map((item) => item.id === updated.id ? updated : item));
+      paperDialog.current?.close();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function importExternal(source: ExternalSource) {
+    if (!source.arxiv_id) return;
+    setBusy(true);
+    try {
+      const importedPaper = await api<Paper>("/papers/download", "POST", {
+        arxiv_id: source.arxiv_id,
+      });
+      setPapers(await api("/papers"));
+      await openPaper(importedPaper);
+      const located = await api<{ anchor: Anchor | null }>(
+        `/papers/${importedPaper.id}/locate`, "POST", { quote: source.quote },
+      );
+      if (located.anchor) {
+        setPage(located.anchor.page);
+        setAnchor(located.anchor);
+        await api(`/papers/${importedPaper.id}/position`, "PUT", {
+          page: located.anchor.page,
+        });
+      }
+      sourceDialog.current?.close();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function newTopic() {
     if (!paper) return;
     setBusy(true);
@@ -437,8 +490,8 @@ export default function App() {
   async function previewContext() {
     setBusy(true);
     try {
-      setContext(
-        await api(
+      const previewKey = `${paper?.id}:${question.trim()}:${academicSearch}`;
+      const value = await api<Context>(
           thread
             ? `/threads/${thread.id}/context`
             : `/papers/${paper!.id}/context`,
@@ -446,9 +499,16 @@ export default function App() {
           {
             question: question.trim() || "解释当前页面",
             anchor: currentAnchor(),
+            academic_search: academicSearch,
+            external_sources:
+              academicSearch && preparedExternal?.key === previewKey
+                ? preparedExternal.sources
+                : [],
           },
-        ),
-      );
+        );
+      setContext(value);
+      if (academicSearch)
+        setPreparedExternal({ key: previewKey, sources: value.external_sources || [] });
       contextDialog.current?.showModal();
     } catch (e) {
       fail(e);
@@ -474,6 +534,7 @@ export default function App() {
     try {
       t = await ensureThread(options?.topicTitle);
       const a = purpose === "question" ? currentAnchor() : null;
+      const previewKey = `${paper.id}:${text}:${academicSearch}`;
       const response = await request(`/threads/${t.id}/messages`, {
         method: "POST",
         body: JSON.stringify({
@@ -481,6 +542,11 @@ export default function App() {
           anchor: a,
           workflow: purpose === "question" ? workflow : "specialist",
           purpose,
+          academic_search: purpose === "question" && academicSearch,
+          external_sources:
+            purpose === "question" && preparedExternal?.key === previewKey
+              ? preparedExternal.sources
+              : [],
         }),
         signal: controller.signal,
       });
@@ -762,7 +828,10 @@ export default function App() {
                 <FileText size={16} />
                 <span>
                   {p.title}
-                  <small>{p.page_count} 页 · 本地 PDF</small>
+                  <small>
+                    {paperIdentity(p)} · {p.page_count} 页
+                    {p.tags.length ? ` · ${p.tags.join(" · ")}` : ""}
+                  </small>
                 </span>
               </button>
             ))
@@ -800,6 +869,19 @@ export default function App() {
             <PanelLeftClose size={16} />
           </button>
           <span className="paper-title">{paper?.title || "阅读工作台"}</span>
+          {paper && (
+            <button
+              className="icon"
+              aria-label="论文标签"
+              title="论文标识与标签"
+              onClick={() => {
+                setPaperTags(paper.tags.join(", "));
+                paperDialog.current?.showModal();
+              }}
+            >
+              <Tags size={16} />
+            </button>
+          )}
           {!paper && <span className="muted">PDF · 原文与理解</span>}
         </header>
         {error && (
@@ -998,6 +1080,11 @@ export default function App() {
                         content={m.content}
                         sources={m.context?.sources || []}
                         onCite={cite}
+                        externalSources={m.context?.external_sources || []}
+                        onExternal={(source) => {
+                          setExternalSource(source);
+                          sourceDialog.current?.showModal();
+                        }}
                       />
                     )}{" "}
                     {m.role === "assistant" &&
@@ -1021,6 +1108,11 @@ export default function App() {
                                   content={stage.content}
                                   sources={m.context?.sources || []}
                                   onCite={cite}
+                                  externalSources={m.context?.external_sources || []}
+                                  onExternal={(source) => {
+                                    setExternalSource(source);
+                                    sourceDialog.current?.showModal();
+                                  }}
                                 />
                               ) : (
                                 <p className="muted">这一阶段没有保存可显示的内容。</p>
@@ -1208,6 +1300,18 @@ export default function App() {
                 </button>
                 <span>{config.model}</span>
               </div>
+              <label className="checkbox academic-search-toggle">
+                <input
+                  type="checkbox"
+                  checked={academicSearch}
+                  disabled={!paper || generating}
+                  onChange={(e) => {
+                    setAcademicSearch(e.target.checked);
+                    setPreparedExternal(null);
+                  }}
+                />
+                检索外部学术资料
+              </label>
               <div className="keyboard-hint">
                 Enter 发送 · Shift + Enter 换行
               </div>
@@ -1573,6 +1677,22 @@ export default function App() {
         {context && (
           <>
             <p className="context-scope">{context.scope}</p>
+            {context.external_sources?.length ? (
+              <section className="external-context">
+                <h3>外部学术资料</h3>
+                {context.external_sources.map((source) => (
+                  <button
+                    key={source.citation}
+                    onClick={() => {
+                      setExternalSource(source);
+                      sourceDialog.current?.showModal();
+                    }}
+                  >
+                    [{source.citation}] {source.title} · {source.locator}
+                  </button>
+                ))}
+              </section>
+            ) : null}
             <p className="small muted">
               普通提问先找选区段落，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
               10 个原文片段、24,000
@@ -1631,6 +1751,47 @@ export default function App() {
         <p className="small muted">
           两种策略都只使用“查看将发送的原文”中列出的论文内容；回答不会自动写入笔记。
         </p>
+      </dialog>
+      <dialog className="source-dialog" ref={sourceDialog}>
+        <DialogTitle title="外部来源" close={() => sourceDialog.current?.close()} />
+        {externalSource && (
+          <>
+            <span className="eyebrow">[{externalSource.citation}] {externalSource.provider}</span>
+            <h3>{externalSource.title}</h3>
+            <p className="muted small">
+              {[externalSource.authors.join(", "), externalSource.year, externalSource.locator,
+                externalSource.retrieved_at ? `检索于 ${new Date(externalSource.retrieved_at).toLocaleString()}` : ""]
+                .filter(Boolean).join(" · ")}
+            </p>
+            <blockquote>{externalSource.quote}</blockquote>
+            <div className="dialog-actions">
+              <a href={externalSource.url} target="_blank" rel="noreferrer">
+                打开原始来源 <ExternalLink size={14} />
+              </a>
+              {externalSource.arxiv_id && (
+                <button disabled={busy} onClick={() => void importExternal(externalSource)}>
+                  下载 PDF 并加入论文库
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </dialog>
+      <dialog ref={paperDialog}>
+        <DialogTitle title="论文标识与标签" close={() => paperDialog.current?.close()} />
+        {paper && (
+          <>
+            <label>标题<input value={paper.title} disabled /></label>
+            <label>Citation key<input value={paper.citation_key} disabled /></label>
+            <label>
+              自定义标签
+              <input value={paperTags} onChange={(e) => setPaperTags(e.target.value)} placeholder="用逗号分隔，例如 systems, 必读" />
+            </label>
+            <button className="primary" disabled={busy} onClick={() => void savePaperTags()}>
+              保存标签
+            </button>
+          </>
+        )}
       </dialog>
     </div>
   );
@@ -1705,16 +1866,26 @@ function DialogTitle({ title, close }: { title: string; close: () => void }) {
     </div>
   );
 }
+function paperIdentity(paper: Paper) {
+  const authors = Array.isArray(paper.source.authors) ? paper.source.authors : [];
+  const first = authors.length ? String(authors[0]).trim().split(/\s+/).at(-1) : "Anon";
+  const year = paper.source.year ? String(paper.source.year) : "n.d.";
+  return `${first} · ${year} · ${paper.citation_key}`;
+}
 function Markdown({
   content,
   sources,
   allowedPages,
   onCite,
+  externalSources = [],
+  onExternal,
 }: {
   content: string;
   sources: Context["sources"];
   allowedPages?: Set<number>;
   onCite: (n: number, anchor?: Anchor | null) => void;
+  externalSources?: ExternalSource[];
+  onExternal?: (source: ExternalSource) => void;
 }) {
   const allowed = allowedPages || new Set(sources.map((source) => source.page));
   const linked = content
@@ -1726,6 +1897,9 @@ function Markdown({
     })
     .replace(/\[p\.(\d+)\]/g, (match, n) =>
       allowed.has(Number(n)) ? `[p.${n}](#pdf-page-${n})` : match,
+    )
+    .replace(/\[E(\d+)\]/g, (match, n) =>
+      externalSources[Number(n) - 1] ? `${match}(#external-source-${Number(n) - 1})` : match,
     );
   return (
     <div className="markdown">
@@ -1743,6 +1917,16 @@ function Markdown({
                 onClick={() => {
                   const source = sources[Number(href.slice(12))];
                   if (source) onCite(source.page, source.anchor);
+                }}
+              >
+                {children}
+              </button>
+            ) : href?.startsWith("#external-source-") ? (
+              <button
+                className="citation external-citation"
+                onClick={() => {
+                  const source = externalSources[Number(href.slice(17))];
+                  if (source && onExternal) onExternal(source);
                 }}
               >
                 {children}

@@ -736,6 +736,47 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.academic-search-toggle {
+  margin-top: 8px;
+  color: #66785d;
+  font-size: 12px;
+}
+.external-citation {
+  background: #eef0f8;
+  color: #56678c;
+}
+.external-context {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.external-context h3 {
+  margin: 0 0 3px;
+  font-size: 14px;
+}
+.external-context button {
+  text-align: left;
+  font-size: 12px;
+}
+.source-dialog blockquote {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border-left: 3px solid #8ca27d;
+  background: #f5f7f1;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.source-dialog .dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.source-dialog .dialog-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .key-reminder {
   font-size: 12px;
   border: 0;

@@ -10,6 +10,8 @@
 - 每篇论文多个主题对话，流式回答、停止生成、恢复阅读位置和最近主题。
 - 默认 Specialist；Draft + Editor 显式选择，Reader draft 经 Editor 对照原文修订后才作为最终回答，审查记录默认折叠。
 - 原文上下文预览；按当前页、相邻页和词项相关性补充同篇片段，不自动外部搜索。
+- 每次提问可显式开启 Semantic Scholar 学术资料检索；外部 evidence 以 `[E1]` 引用，保存 exact excerpt、section、来源链接和检索 provider。
+- 论文实体按 PDF SHA256 去重；列表显示不可编辑标题、派生 citation key，并允许用户添加多个自定义标签。
 - 对话自动保存，笔记手动确认、编辑、导出 Markdown。
 - DeepSeek 与 OpenAI-compatible provider 接口；默认 `deepseek-flash`（V4.1 Flash）。
 - 每次输出上限，run 按阶段保存 draft、review、状态与 usage；失败不自动重试、不自动启动更多 agent。
@@ -75,7 +77,7 @@ DeepSeek 默认关闭 thinking，单次输出上限 4096 tokens；可以在设�
   cache/               导入和渲染的临时文件
 ```
 
-整个目录都是用户数据，不进入 GitHub。用户选区引用包含 PDF hash、页码和归一化坐标；AI 回答还保存页内片段编号，并在解析文本能够匹配 PDF word boxes 时提供片段高亮。
+整个目录都是用户数据，不进入 GitHub。用户选区引用包含 PDF hash、页码和归一化坐标；AI 回答还保存页内片段编号，并在解析文本能够匹配 PDF word boxes 时提供片段高亮。学术检索的 exact excerpts 保存于回答的 context snapshot；来源 PDF 只有在用户点击下载后才进入主论文库。
 SQLite 是唯一正式记录；导出的 Markdown 是副本，不做双向同步。
 API 调用会把选区和相关文本发送到所选 provider；本地保存不意味着模型在本地运行。
 

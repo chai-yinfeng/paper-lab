@@ -13,6 +13,21 @@ export type Paper = {
   page_count: number;
   current_page: number;
   source: Record<string, unknown>;
+  citation_key: string;
+  tags: string[];
+};
+export type ExternalSource = {
+  citation: string;
+  title: string;
+  authors: string[];
+  year: string | number | null;
+  url: string;
+  locator: string;
+  quote: string;
+  source_type: string;
+  provider: string;
+  arxiv_id: string | null;
+  retrieved_at: string;
 };
 export type Thread = { id: string; title: string };
 export type Context = {
@@ -30,6 +45,7 @@ export type Context = {
   scope: string;
   image_attached: boolean;
   anchor: Anchor | null;
+  external_sources?: ExternalSource[];
   coverage?: {
     pages_included: number[];
     total_pages: number;

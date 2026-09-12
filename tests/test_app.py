@@ -154,7 +154,7 @@ class ContextTests(unittest.TestCase):
                 columns = [row[1] for row in migrated.conn.execute("PRAGMA table_info(runs)")]
                 self.assertIn("trace", columns)
                 self.assertEqual(
-                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 2
+                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 3
                 )
             finally:
                 migrated.close()
@@ -252,6 +252,50 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len((await self.client.get("/api/papers/paper/threads")).json()), 2
         )
+
+    async def test_paper_identity_and_user_tags_are_separate_from_pdf_storage(self):
+        paper = (await self.client.get("/api/papers")).json()[0]
+        self.assertEqual(paper["citation_key"], "AnonNDSynthetic")
+        self.assertEqual(paper["tags"], [])
+        response = await self.client.put(
+            "/api/papers/paper/tags", json={"tags": ["systems", " 必读 ", "systems"]}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["tags"], ["systems", "必读"])
+        self.assertEqual(response.json()["sha256"], SHA)
+
+    async def test_academic_evidence_is_saved_and_sent_with_stable_ids(self):
+        captured = []
+
+        async def fake(settings, key, messages):
+            captured.append(messages)
+            yield {"type": "delta", "text": "External claim [E1]."}
+            yield {"type": "finish", "reason": "stop"}
+
+        source = {
+            "citation": "anything",
+            "title": "External Paper",
+            "authors": ["A. Author"],
+            "year": 2024,
+            "url": "https://www.semanticscholar.org/paper/example",
+            "locator": "Methods",
+            "quote": "This is an exact external evidence passage long enough to validate.",
+            "arxiv_id": None,
+        }
+        with patch("paper_lab.api.stream_completion", fake):
+            response = await self.client.post(
+                "/api/threads/topic/messages",
+                json={
+                    "question": "Explain",
+                    "academic_search": True,
+                    "external_sources": [source],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("[E1] External Paper", captured[0][-1]["content"])
+        message = (await self.client.get("/api/threads/topic/messages")).json()[-1]
+        self.assertEqual(message["context"]["external_sources"][0]["citation"], "E1")
+        self.assertEqual(message["context"]["external_sources"][0]["quote"], source["quote"])
 
     async def test_delete_topic_preserves_confirmed_note(self):
         self.db.execute(

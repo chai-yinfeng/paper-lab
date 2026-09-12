@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS papers (
  id TEXT PRIMARY KEY, title TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE,
  filename TEXT NOT NULL, source TEXT NOT NULL, page_count INTEGER NOT NULL,
  current_page INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paper_tags (
+ paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE, tag TEXT NOT NULL,
+ PRIMARY KEY(paper_id,tag));
 CREATE TABLE IF NOT EXISTS pages (
  paper_id TEXT NOT NULL REFERENCES papers(id), number INTEGER NOT NULL,
  width REAL NOT NULL, height REAL NOT NULL, text TEXT NOT NULL, words TEXT NOT NULL,
@@ -47,7 +50,7 @@ CREATE INDEX IF NOT EXISTS runs_thread ON runs(thread_id, created_at);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Store:

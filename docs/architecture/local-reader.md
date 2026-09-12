@@ -12,6 +12,7 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
 
 - `papers`: an immutable document version identified by SHA256; original filename and import provenance.
   A different PDF hash is a separate record in this version. Identity-level version grouping is deferred.
+- `paper_tags`: user-defined labels independent of the immutable title and derived citation key.
 - `pages`: physical page number, CropBox dimensions, extracted text and normalized word boxes.
 - `threads`: multiple named conversations per paper, ordered by activity.
 - `messages`: user or assistant content, PDF anchor, context snapshot, model and completion status.
@@ -21,6 +22,12 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
   usage and completion/error status. Draft + Editor keeps the Reader draft and Editor review in the trace;
   the linked assistant message contains only the edited final answer.
 - `settings`: provider configuration and resume pointers, never API secrets.
+
+Academic search is explicitly enabled per question and is independent of the LLM provider. Semantic Scholar
+snippet results are normalized into bounded `[E1]` evidence records containing an exact excerpt, locator,
+canonical link and provider. The records are saved in the assistant message's context snapshot. Search snippets
+without a fetched PDF never receive an invented page number. An arXiv-backed source can be downloaded into the
+main SHA256-deduplicated library; Paper Lab then attempts an exact word-sequence match to recover page boxes.
 
 SQLite foreign keys and transactions protect relationships. `PRAGMA user_version` is the migration boundary;
 unknown newer versions are rejected. Import writes a validated PDF before committing its database record;

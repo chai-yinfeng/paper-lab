@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import secrets
 import shutil
 import time
@@ -18,13 +19,14 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.concurrency import run_in_threadpool
 
-from .context import build_context, build_summary_context
+from .context import add_external_sources, build_context, build_summary_context, locate_excerpt
 from .documents import MAX_PDF, crop, import_pdf, validate_anchor
 from .keychain import get_key as keychain_get
 from .keychain import set_key as keychain_set
 from .preferences import recent_workspace, remember_workspace
 from .providers import ProviderSettings, stream_completion
 from .search import download, search
+from .scholarly import normalize_sources, search_academic
 from .store import decoded, stamp, uid
 from .workspace import REPO, Workspace, pick_directory
 
@@ -39,6 +41,18 @@ def parse_editor_output(text: str) -> tuple[str, str]:
         if final:
             return review, final
     return "Editor 未返回独立的审查摘要。", text.strip()
+
+
+def citation_key(row):
+    source = row.get("source") or {}
+    if isinstance(source, str):
+        source = json.loads(source)
+    authors = source.get("authors") or []
+    surname = str(authors[0] if authors else "Anon").split()[-1]
+    year = str(source.get("year") or "ND")
+    first = next(iter(re.findall(r"[A-Za-z0-9]+", row.get("title") or "Paper")), "Paper")
+    clean = lambda value: re.sub(r"[^A-Za-z0-9]", "", value)
+    return (clean(surname) or "Anon") + (clean(year) or "ND") + (clean(first) or "Paper")
 
 
 def create_app():
@@ -133,6 +147,17 @@ def create_app():
     def paper(paper_id):
         return ws().store.one("SELECT * FROM papers WHERE id=?", (paper_id,))
 
+    def paper_view(row):
+        value = decoded(row)
+        value["citation_key"] = citation_key(value)
+        value["tags"] = [
+            item["tag"]
+            for item in ws().store.all(
+                "SELECT tag FROM paper_tags WHERE paper_id=? ORDER BY tag", (row["id"],)
+            )
+        ]
+        return value
+
     def thread(thread_id):
         return ws().store.one("SELECT * FROM threads WHERE id=?", (thread_id,))
 
@@ -200,7 +225,7 @@ def create_app():
     @app.get("/api/papers")
     def papers():
         return [
-            decoded(p)
+            paper_view(p)
             for p in ws().store.all("SELECT * FROM papers ORDER BY created_at DESC")
         ]
 
@@ -216,7 +241,7 @@ def create_app():
                 file.filename or "paper.pdf",
                 {"kind": "upload", "filename": file.filename or "paper.pdf"},
             )
-            return decoded(row)
+            return paper_view(row)
         finally:
             await file.close()
 
@@ -233,7 +258,26 @@ def create_app():
         row = await run_in_threadpool(
             import_pdf, w, data, source["arxiv_id"].replace("/", "-") + ".pdf", source
         )
-        return decoded(row)
+        return paper_view(row)
+
+    @app.put("/api/papers/{paper_id}/tags")
+    def update_tags(paper_id: str, body: Tags):
+        p = paper(paper_id)
+        tags = sorted({" ".join(tag.split())[:40] for tag in body.tags if tag.strip()})
+        if len(tags) > 20:
+            raise ValueError("每篇论文最多添加 20 个标签。")
+        db = ws().store
+        with db.lock, db.conn:
+            db.conn.execute("DELETE FROM paper_tags WHERE paper_id=?", (paper_id,))
+            db.conn.executemany(
+                "INSERT INTO paper_tags(paper_id,tag) VALUES (?,?)",
+                [(paper_id, tag) for tag in tags],
+            )
+        return paper_view(p)
+
+    @app.post("/api/papers/{paper_id}/locate")
+    def locate(paper_id: str, body: Quote):
+        return {"anchor": locate_excerpt(ws().store, paper(paper_id), body.quote)}
 
     @app.get("/api/papers/{paper_id}/pdf")
     def pdf(paper_id: str):
@@ -328,22 +372,32 @@ def create_app():
         return {"requested": bool(task)}
 
     @app.post("/api/threads/{thread_id}/context")
-    def context(thread_id: str, body: Question):
+    async def context(thread_id: str, body: Question):
         t = thread(thread_id)
         builder = build_summary_context if body.purpose != "question" else build_context
         if body.purpose == "question":
             packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.question, body.anchor)
         else:
             packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.purpose)
+        if body.academic_search:
+            external = normalize_sources(body.external_sources) or await search_academic(
+                paper(t["paper_id"])["title"] + " " + body.question
+            )
+            packet, _ = add_external_sources(packet, _, external)
         return packet
 
     @app.post("/api/papers/{paper_id}/context")
-    def paper_context(paper_id: str, body: Question):
+    async def paper_context(paper_id: str, body: Question):
         p = paper(paper_id)
         if body.purpose == "question":
             packet, _ = build_context(ws().store, p, None, body.question, body.anchor)
         else:
             packet, _ = build_summary_context(ws().store, p, None, body.purpose)
+        if body.academic_search:
+            external = normalize_sources(body.external_sources) or await search_academic(
+                p["title"] + " " + body.question
+            )
+            packet, _ = add_external_sources(packet, _, external)
         return packet
 
     @app.post("/api/threads/{thread_id}/messages")
@@ -366,6 +420,11 @@ def create_app():
         try:
             if body.purpose == "question":
                 packet, chat = build_context(db, p, thread_id, body.question, anchor)
+                if body.academic_search:
+                    external = normalize_sources(body.external_sources) or await search_academic(
+                        p["title"] + " " + body.question
+                    )
+                    packet, chat = add_external_sources(packet, chat, external)
             else:
                 anchor = None
                 packet, chat = build_summary_context(db, p, thread_id, body.purpose)
@@ -730,6 +789,14 @@ class Title(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class Tags(BaseModel):
+    tags: list[str]
+
+
+class Quote(BaseModel):
+    quote: str = Field(min_length=8, max_length=3000)
+
+
 class Position(BaseModel):
     page: int = Field(ge=1)
 
@@ -739,6 +806,8 @@ class Question(BaseModel):
     anchor: dict | None = None
     workflow: Literal["specialist", "draft-editor", "reader-checker"] = "specialist"
     purpose: Literal["question", "pre-read", "post-read"] = "question"
+    academic_search: bool = False
+    external_sources: list[dict] = Field(default_factory=list)
 
 
 class NoteText(BaseModel):
