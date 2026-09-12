@@ -1749,7 +1749,7 @@ export default function App() {
           </p>
         </article>
         <p className="small muted">
-          两种策略都只使用“查看将发送的原文”中列出的论文内容；回答不会自动写入笔记。
+          两种策略都只使用“查看将发送的原文”中列出的当前论文内容，以及本次显式开启并列出的外部学术资料；回答不会自动写入笔记。
         </p>
       </dialog>
       <dialog className="source-dialog" ref={sourceDialog}>

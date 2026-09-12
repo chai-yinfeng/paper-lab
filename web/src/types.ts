@@ -28,6 +28,7 @@ export type ExternalSource = {
   provider: string;
   arxiv_id: string | null;
   retrieved_at: string;
+  content_hash: string;
 };
 export type Thread = { id: string; title: string };
 export type Context = {

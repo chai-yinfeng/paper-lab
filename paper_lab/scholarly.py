@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import re
+import hashlib
 import httpx
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -85,6 +86,7 @@ async def search_academic(query: str, limit: int = 5):
                 "provider": "Semantic Scholar",
                 "arxiv_id": arxiv,
                 "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "content_hash": hashlib.sha256(quote.encode()).hexdigest(),
             }
         )
     return results
@@ -119,6 +121,7 @@ def normalize_sources(values):
                     else None
                 ),
                 "retrieved_at": str(value.get("retrieved_at") or "")[:64],
+                "content_hash": hashlib.sha256(quote.encode()).hexdigest(),
             }
         )
     return results
