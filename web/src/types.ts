@@ -22,6 +22,12 @@ export type Context = {
   scope: string;
   image_attached: boolean;
   anchor: Anchor | null;
+  coverage?: {
+    pages_included: number[];
+    total_pages: number;
+    extractable_pages?: number;
+    complete_text?: boolean;
+  };
 };
 export type Message = {
   id: string;
@@ -37,6 +43,10 @@ export type Note = {
   content: string;
   message_id: string | null;
   anchor: Anchor | null;
+  paper_id: string;
+  paper_title?: string;
+  paper_sha256?: string;
+  paper_page_count?: number;
 };
 export type Provider = {
   provider: string;

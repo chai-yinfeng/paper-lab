@@ -15,7 +15,8 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
 - `pages`: physical page number, CropBox dimensions, extracted text and normalized word boxes.
 - `threads`: multiple named conversations per paper, ordered by activity.
 - `messages`: user or assistant content, PDF anchor, context snapshot, model and completion status.
-- `notes`: explicit user-confirmed text, optional source message and anchor. AI responses never insert notes.
+- `notes`: explicit user-confirmed text, optional source message and anchor. The notebook is global and can show
+  one paper or every paper, while retaining paper provenance for source jumps. AI responses never insert notes.
 - `runs`: workflow, provider, requested model, actual returned model per step, usage and completion/error status.
 - `settings`: provider configuration and resume pointers, never API secrets.
 
@@ -31,17 +32,23 @@ stop the application before copying it. No automatic migration of previous counc
 2. PDF.js renders one page and a selectable text layer. Fonts, CMaps and WASM are served locally.
 3. Text selection records quote and per-line normalized rectangles. Rectangle selection records a region and
    nearby extracted text. Anchors use displayed CropBox coordinates and physical page numbers starting at one.
-4. A question uses the selected/current page, neighboring pages and a few lexical matches, up to 24,000 source
-   characters and 10,000 history characters. The history window is at most 12 complete messages.
+4. A question ranks paragraph-sized excerpts by exact selection, current/neighboring pages, lexical matches and
+   the first-page overview. It sends at most 10 excerpts, 24,000 source characters and 10,000 history characters.
+   The preview states why every excerpt was selected and shows the exact text before a paid call.
 5. Region questions attach a bounded PNG rendered by Poppler; text questions send text. No OCR is silently
    substituted. Image-only pages require a vision-enabled provider and a region selection.
 6. Answers use `[p.N]`; only supplied source pages become clickable citations. These are locators, not proof
    that a generated claim is true. Saved user anchors restore highlights; generated page citations return to a page.
 7. The user confirms/edits an answer to create a note. Reading position and selected topic can be resumed.
+8. Reading-before and reading-after summaries each use one Specialist call. Up to 80,000 extracted characters
+   are distributed across every physical page; long pages retain their beginning and end and disclose sampling.
+   Paper claims require page citations. Unsearched model knowledge is explicitly labeled external background.
+9. The reader supports normal scrolling within a page, wheel/trackpad page turns at vertical edges, horizontal
+   swipes, touch swipes and PageUp/PageDown or left/right keys.
 
-The context builder is deliberately simple and deterministic; it is not semantic retrieval and cannot guarantee
-finding all relevant definitions, especially for Chinese questions about English text. The preview lists the
-actual source excerpts. The assistant must disclose insufficient coverage, not claim it read the whole paper.
+The context builder is deterministic; it is not semantic retrieval and cannot guarantee finding every relevant
+definition, especially for Chinese questions about English text. Full-paper summaries are complete only when all
+extracted text fits the stated budget; otherwise they are page-balanced summaries with disclosed sampling.
 
 ## Model boundary and workflow
 

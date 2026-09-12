@@ -12,7 +12,7 @@ from unittest.mock import patch
 import httpx
 
 from paper_lab.api import create_app
-from paper_lab.context import build_context
+from paper_lab.context import build_context, build_summary_context
 from paper_lab.documents import validate_anchor, import_pdf
 from paper_lab.keychain import SERVICE
 from paper_lab.keychain import get_key as keychain_get
@@ -66,6 +66,19 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(packet["sources"][0]["page"], 1)
         self.assertIn("[p.1]", messages[-1]["content"])
         self.assertEqual(len(messages), 2)
+        self.assertEqual(packet["sources"][0]["reason"], "当前页相关段落")
+        self.assertEqual(packet["coverage"]["total_pages"], 3)
+
+    def test_full_summary_covers_every_page_and_discloses_sampling(self):
+        packet, messages = build_summary_context(
+            self.db, self.paper, "topic", "post-read", budget=6000
+        )
+        self.assertEqual(packet["coverage"]["pages_included"], [1, 2, 3])
+        self.assertLessEqual(packet["characters"], 6000)
+        self.assertFalse(packet["coverage"]["complete_text"])
+        self.assertIn("逐页覆盖 3/3 页", packet["scope"])
+        self.assertIn("[p.3]", messages[-1]["content"])
+        self.assertIn("外部背景（未检索）", messages[0]["content"])
 
     def test_anchor_rejects_wrong_source_and_nonfinite_coordinates(self):
         a = {
@@ -193,6 +206,38 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len((await self.client.get("/api/papers/paper/threads")).json()), 2
         )
+
+    async def test_delete_topic_preserves_confirmed_note(self):
+        self.db.execute(
+            "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
+            ("msg", "topic", "assistant", "saved", None, None, "complete", None, stamp()),
+        )
+        note = await self.client.post(
+            "/api/papers/paper/notes", json={"message_id": "msg", "content": "keep me"}
+        )
+        response = await self.client.delete("/api/threads/topic")
+        self.assertEqual(response.status_code, 200, response.text)
+        saved = (await self.client.get("/api/notes")).json()
+        self.assertEqual(saved[0]["id"], note.json()["id"])
+        self.assertIsNone(saved[0]["message_id"])
+        self.assertEqual(saved[0]["paper_title"], "Synthetic source")
+
+    async def test_summary_is_always_one_call(self):
+        calls = []
+
+        async def fake(settings, key, messages):
+            calls.append(messages)
+            yield {"type": "delta", "text": "Summary [p.1]."}
+            yield {"type": "finish", "reason": "stop"}
+
+        with patch("paper_lab.api.stream_completion", fake):
+            response = await self.client.post(
+                "/api/threads/topic/messages",
+                json={"question": "总结", "purpose": "pre-read", "workflow": "reader-checker"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.db.one("SELECT * FROM runs")["workflow"], "specialist")
 
     async def test_missing_key_does_not_create_message_or_run(self):
         self.app.state.key_cache[("deepseek", "https://api.deepseek.com")] = (

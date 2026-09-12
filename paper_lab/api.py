@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.concurrency import run_in_threadpool
 
-from .context import build_context
+from .context import build_context, build_summary_context
 from .documents import MAX_PDF, crop, import_pdf, validate_anchor
 from .keychain import get_key as keychain_get
 from .keychain import set_key as keychain_set
@@ -267,6 +267,25 @@ def create_app():
         )
         return thread(thread_id)
 
+    @app.delete("/api/threads/{thread_id}")
+    def delete_thread(thread_id: str):
+        t = thread(thread_id)
+        if thread_id in app.state.active:
+            raise ValueError("这个主题正在生成回答，停止后才能删除。")
+        db = ws().store
+        with db.lock, db.conn:
+            db.conn.execute(
+                "UPDATE notes SET message_id=NULL WHERE message_id IN (SELECT id FROM messages WHERE thread_id=?)",
+                (thread_id,),
+            )
+            db.conn.execute("DELETE FROM runs WHERE thread_id=?", (thread_id,))
+            db.conn.execute("DELETE FROM messages WHERE thread_id=?", (thread_id,))
+            db.conn.execute("DELETE FROM threads WHERE id=?", (thread_id,))
+        saved = db.setting("session", {})
+        if saved.get("thread_id") == thread_id:
+            db.set_setting("session", {"paper_id": t["paper_id"], "thread_id": None})
+        return {"deleted": thread_id}
+
     @app.get("/api/threads/{thread_id}/messages")
     def messages(thread_id: str):
         thread(thread_id)
@@ -299,9 +318,20 @@ def create_app():
     @app.post("/api/threads/{thread_id}/context")
     def context(thread_id: str, body: Question):
         t = thread(thread_id)
-        packet, _ = build_context(
-            ws().store, paper(t["paper_id"]), thread_id, body.question, body.anchor
-        )
+        builder = build_summary_context if body.purpose != "question" else build_context
+        if body.purpose == "question":
+            packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.question, body.anchor)
+        else:
+            packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.purpose)
+        return packet
+
+    @app.post("/api/papers/{paper_id}/context")
+    def paper_context(paper_id: str, body: Question):
+        p = paper(paper_id)
+        if body.purpose == "question":
+            packet, _ = build_context(ws().store, p, None, body.question, body.anchor)
+        else:
+            packet, _ = build_summary_context(ws().store, p, None, body.purpose)
         return packet
 
     @app.post("/api/threads/{thread_id}/messages")
@@ -322,7 +352,11 @@ def create_app():
         # Reserve before any await, including image rendering, so two tabs cannot race.
         app.state.active.add(thread_id)
         try:
-            packet, chat = build_context(db, p, thread_id, body.question, anchor)
+            if body.purpose == "question":
+                packet, chat = build_context(db, p, thread_id, body.question, anchor)
+            else:
+                anchor = None
+                packet, chat = build_summary_context(db, p, thread_id, body.purpose)
             if anchor and anchor["kind"] == "region":
                 page = db.one(
                     "SELECT * FROM pages WHERE paper_id=? AND number=?",
@@ -341,6 +375,7 @@ def create_app():
                     },
                 ]
             user_id, answer_id, run_id = uid(), uid(), uid()
+            effective_workflow = body.workflow if body.purpose == "question" else "specialist"
             now = stamp()
             encoded_anchor = json.dumps(anchor, ensure_ascii=False) if anchor else None
             with db.lock, db.conn:
@@ -378,7 +413,7 @@ def create_app():
                         run_id,
                         thread_id,
                         answer_id,
-                        body.workflow,
+                        effective_workflow,
                         "running",
                         settings.provider,
                         settings.model,
@@ -411,10 +446,10 @@ def create_app():
                         "type": "start",
                         "message_id": answer_id,
                         "context": packet,
-                        "max_calls": 2 if body.workflow == "reader-checker" else 1,
+                        "max_calls": 2 if effective_workflow == "reader-checker" else 1,
                     }
                 )
-                calls = 2 if body.workflow == "reader-checker" else 1
+                calls = 2 if effective_workflow == "reader-checker" else 1
                 for step in range(calls):
                     if step:
                         separator = "\n\n---\n\n### Checker 核查\n\n"
@@ -524,6 +559,18 @@ def create_app():
             )
         ]
 
+    @app.get("/api/notes")
+    def all_notes():
+        return [
+            decoded(n)
+            for n in ws().store.all(
+                """SELECT n.*,p.title AS paper_title,p.sha256 AS paper_sha256,
+                          p.page_count AS paper_page_count
+                   FROM notes n JOIN papers p ON p.id=n.paper_id
+                   ORDER BY n.updated_at DESC"""
+            )
+        ]
+
     @app.post("/api/papers/{paper_id}/notes")
     def save_note(paper_id: str, body: Note):
         p = paper(paper_id)
@@ -619,6 +666,7 @@ class Question(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
     anchor: dict | None = None
     workflow: Literal["specialist", "reader-checker"] = "specialist"
+    purpose: Literal["question", "pre-read", "post-read"] = "question"
 
 
 class NoteText(BaseModel):

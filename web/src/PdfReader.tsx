@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type WheelEvent } from "react";
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -41,6 +41,8 @@ export default function PdfReader({
     [outline, setOutline] = useState<{ title: string; dest: unknown }[]>([]),
     [showOutline, setShowOutline] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
+  const wheel = useRef({ amount: 0, last: 0, turned: 0 });
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     let active = true;
     const task = getDocument({
@@ -78,6 +80,38 @@ export default function PdfReader({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    if (scroll.current) {
+      scroll.current.scrollTop = 0;
+      scroll.current.scrollLeft = 0;
+    }
+  }, [page]);
+  function turn(direction: -1 | 1) {
+    const next = page + direction;
+    if (next >= 1 && next <= paper.page_count) setPage(next);
+  }
+  function onWheel(e: WheelEvent<HTMLDivElement>) {
+    const element = e.currentTarget;
+    const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    const delta = horizontal ? e.deltaX : e.deltaY;
+    const atStart = element.scrollTop <= 1;
+    const atEnd =
+      element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+    if (!horizontal && !((delta < 0 && atStart) || (delta > 0 && atEnd)))
+      return;
+    const now = Date.now();
+    if (now - wheel.current.last > 220) wheel.current.amount = 0;
+    wheel.current.last = now;
+    wheel.current.amount += delta;
+    if (
+      Math.abs(wheel.current.amount) > 90 &&
+      now - wheel.current.turned > 550
+    ) {
+      e.preventDefault();
+      turn(wheel.current.amount > 0 ? 1 : -1);
+      wheel.current = { amount: 0, last: now, turned: now };
+    }
+  }
   async function jump(dest: unknown) {
     if (!doc) return;
     try {
@@ -168,7 +202,45 @@ export default function PdfReader({
           )}
         </div>
       )}
-      <div className="pdf-scroll" ref={scroll}>
+      <div
+        className="pdf-scroll"
+        ref={scroll}
+        tabIndex={0}
+        aria-label="PDF 页面。可滚动、横向滑动或使用方向键翻页"
+        onWheel={onWheel}
+        onKeyDown={(e) => {
+          if (["ArrowRight", "PageDown"].includes(e.key)) {
+            e.preventDefault();
+            turn(1);
+          }
+          if (["ArrowLeft", "PageUp"].includes(e.key)) {
+            e.preventDefault();
+            turn(-1);
+          }
+        }}
+        onTouchStart={(e) => {
+          const t = e.touches[0];
+          touchStart.current = { x: t.clientX, y: t.clientY };
+        }}
+        onTouchEnd={(e) => {
+          if (!touchStart.current || !e.changedTouches[0]) return;
+          const t = e.changedTouches[0],
+            dx = touchStart.current.x - t.clientX,
+            dy = touchStart.current.y - t.clientY;
+          const atStart = e.currentTarget.scrollTop <= 1;
+          const atEnd =
+            e.currentTarget.scrollTop + e.currentTarget.clientHeight >=
+            e.currentTarget.scrollHeight - 1;
+          if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy))
+            turn(dx > 0 ? 1 : -1);
+          else if (
+            Math.abs(dy) > 65 &&
+            ((dy < 0 && atStart) || (dy > 0 && atEnd))
+          )
+            turn(dy > 0 ? 1 : -1);
+          touchStart.current = null;
+        }}
+      >
         {doc ? (
           <PdfPage
             key={`${paper.id}-${page}-${width}-${zoom}`}

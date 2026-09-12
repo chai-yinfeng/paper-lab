@@ -1005,3 +1005,99 @@ hr {
   --scale-round-x: 1px;
   --scale-round-y: 1px;
 }
+
+/* Reading interaction refinements */
+.topic-bar select {
+  min-width: 0;
+  flex: 1;
+}
+.topic-bar button {
+  flex-shrink: 0;
+}
+.topic-bar .danger-icon {
+  color: #985746;
+}
+.summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 20px;
+  border-bottom: 1px solid #f0f2eb;
+  background: #fbfcf9;
+}
+.summary-actions > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #6e7d68;
+  font-size: 12px;
+  margin-right: auto;
+}
+.summary-actions button {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.composer textarea {
+  min-height: 92px;
+}
+.composer button {
+  padding: 6px 10px;
+}
+.selection-chip p {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 7px 15px 0 0;
+}
+.selection-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 26px;
+  color: #72806d;
+}
+.selection-chip details {
+  margin-top: 6px;
+}
+.selection-chip summary {
+  cursor: pointer;
+  color: #52694d;
+}
+.keyboard-hint {
+  margin-top: 4px;
+  font-size: 10px !important;
+  color: #9aa297 !important;
+  justify-content: flex-end !important;
+}
+.pdf-scroll {
+  outline: none;
+}
+.pdf-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px #708e66;
+}
+.notes-filter {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #697962;
+}
+.note-paper {
+  border: 0;
+  padding: 0;
+  margin: 0 8px 8px 0;
+  background: transparent;
+  color: #647a5b;
+  font-size: 12px;
+  text-align: left;
+}
+.context-scope {
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #f0f4e9;
+  color: #52684b;
+  font-size: 13px;
+}
+.context-jump {
+  margin: 0 12px 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+}

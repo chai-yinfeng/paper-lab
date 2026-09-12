@@ -15,6 +15,9 @@ import {
   Check,
   ChevronDown,
   PanelLeftClose,
+  Pencil,
+  Trash2,
+  Sparkles,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -46,6 +49,7 @@ export default function App() {
     [thread, setThread] = useState<Thread | null>(null),
     [messages, setMessages] = useState<Message[]>([]),
     [notes, setNotes] = useState<Note[]>([]),
+    [showCrossPaperNotes, setShowCrossPaperNotes] = useState(false),
     [runs, setRuns] = useState<Run[]>([]),
     [tab, setTab] = useState<"chat" | "notes">("chat"),
     [question, setQuestion] = useState(""),
@@ -80,6 +84,7 @@ export default function App() {
     [noteText, setNoteText] = useState(""),
     [noteSource, setNoteSource] = useState<Message | Note | null>(null),
     [editingNote, setEditingNote] = useState(false);
+  const [editingTopic, setEditingTopic] = useState(false);
   const abort = useRef<AbortController | null>(null),
     epoch = useRef(0),
     messageEpoch = useRef(0),
@@ -149,8 +154,12 @@ export default function App() {
     return () => lifecycle.abort();
   }, [paper, page, anchor, thread]);
   async function restoreSession() {
-    const ps = await api<Paper[]>("/papers");
+    const [ps, ns] = await Promise.all([
+      api<Paper[]>("/papers"),
+      api<Note[]>("/notes"),
+    ]);
     setPapers(ps);
+    setNotes(ns);
     const saved = await api<{ paper_id?: string; thread_id?: string }>(
       "/session",
     );
@@ -183,14 +192,9 @@ export default function App() {
     setThread(null);
     setMessages([]);
     setThreads([]);
-    setNotes([]);
     setRuns([]);
-    const [ts, ns] = await Promise.all([
-      api<Thread[]>(`/papers/${p.id}/threads`),
-      api<Note[]>(`/papers/${p.id}/notes`),
-    ]);
+    const ts = await api<Thread[]>(`/papers/${p.id}/threads`);
     if (id !== epoch.current) return;
-    setNotes(ns);
     setThreads(ts);
     if (ts.length) {
       const selected = ts.find((t) => t.id === preferredThread) || ts[0];
@@ -226,14 +230,20 @@ export default function App() {
         : null)
     );
   }
-  async function ensureThread() {
-    if (thread) return thread;
+  async function ensureThread(preferredTitle?: string) {
+    if (preferredTitle) {
+      const existing = threads.find((t) => t.title === preferredTitle);
+      if (existing) {
+        if (thread?.id !== existing.id) await loadThread(existing);
+        return existing;
+      }
+    } else if (thread) return thread;
     if (!paper) throw new Error("请先打开论文。");
     const t = await api<Thread>(`/papers/${paper.id}/threads`, "POST", {
-      title: question.trim().slice(0, 35) || "阅读讨论",
+      title: preferredTitle || question.trim().slice(0, 35) || "阅读讨论",
     });
     setThreads((old) => [t, ...old]);
-    setThread(t);
+    await loadThread(t);
     await api("/session", "PUT", { paper_id: paper.id, thread_id: t.id });
     return t;
   }
@@ -341,10 +351,19 @@ export default function App() {
     if (!paper) return;
     setBusy(true);
     try {
-      const t = await api<Thread>(`/papers/${paper.id}/threads`, "POST", {
-        title: topicTitle,
-      });
-      setThreads((old) => [t, ...old]);
+      const t =
+        editingTopic && thread
+          ? await api<Thread>(`/threads/${thread.id}`, "PATCH", {
+              title: topicTitle,
+            })
+          : await api<Thread>(`/papers/${paper.id}/threads`, "POST", {
+              title: topicTitle,
+            });
+      setThreads((old) =>
+        editingTopic
+          ? old.map((item) => (item.id === t.id ? t : item))
+          : [t, ...old],
+      );
       await loadThread(t);
       await api("/session", "PUT", { paper_id: paper.id, thread_id: t.id });
       setQuestion("");
@@ -355,15 +374,49 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function deleteTopic() {
+    if (!paper || !thread || generating) return;
+    if (
+      !window.confirm(
+        `删除主题“${thread.title}”及其中的对话？已确认保存的笔记会保留。`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await api(`/threads/${thread.id}`, "DELETE");
+      const remaining = threads.filter((t) => t.id !== thread.id);
+      setThreads(remaining);
+      setThread(null);
+      setMessages([]);
+      setRuns([]);
+      if (remaining.length) {
+        await loadThread(remaining[0]);
+        await api("/session", "PUT", {
+          paper_id: paper.id,
+          thread_id: remaining[0].id,
+        });
+      } else await api("/session", "PUT", { paper_id: paper.id });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function previewContext() {
     setBusy(true);
     try {
-      const t = await ensureThread();
       setContext(
-        await api(`/threads/${t.id}/context`, "POST", {
-          question: question.trim() || "解释当前页面",
-          anchor: currentAnchor(),
-        }),
+        await api(
+          thread
+            ? `/threads/${thread.id}/context`
+            : `/papers/${paper!.id}/context`,
+          "POST",
+          {
+            question: question.trim() || "解释当前页面",
+            anchor: currentAnchor(),
+          },
+        ),
       );
       contextDialog.current?.showModal();
     } catch (e) {
@@ -372,8 +425,14 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function send() {
-    if (!question.trim() || generating || !paper) return;
+  async function send(options?: {
+    text?: string;
+    purpose?: "question" | "pre-read" | "post-read";
+    topicTitle?: string;
+  }) {
+    const text = (options?.text ?? question).trim();
+    const purpose = options?.purpose || "question";
+    if (!text || generating || !paper) return;
     setGenerating(true);
     setError("");
     setPhase("准备原文");
@@ -382,16 +441,20 @@ export default function App() {
     let t: Thread | null = null;
     let sent = false;
     try {
-      t = await ensureThread();
-      const text = question.trim(),
-        a = currentAnchor();
+      t = await ensureThread(options?.topicTitle);
+      const a = purpose === "question" ? currentAnchor() : null;
       const response = await request(`/threads/${t.id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ question: text, anchor: a, workflow }),
+        body: JSON.stringify({
+          question: text,
+          anchor: a,
+          workflow: purpose === "question" ? workflow : "specialist",
+          purpose,
+        }),
         signal: controller.signal,
       });
       sent = true;
-      setQuestion("");
+      if (purpose === "question") setQuestion("");
       let answerId = "pending";
       setMessages((old) => [
         ...old,
@@ -489,18 +552,18 @@ export default function App() {
     noteDialog.current?.showModal();
   }
   async function saveNote() {
-    if (!paper || !noteSource) return;
+    if (!noteSource) return;
     setBusy(true);
     try {
       if (editingNote)
         await api(`/notes/${noteSource.id}`, "PUT", { content: noteText });
-      else
+      else if (paper)
         await api(`/papers/${paper.id}/notes`, "POST", {
           content: noteText,
           message_id: noteSource.id,
           anchor: noteSource.anchor,
         });
-      setNotes(await api(`/papers/${paper.id}/notes`));
+      setNotes(await api(`/notes`));
       noteDialog.current?.close();
       setError("");
     } catch (e) {
@@ -511,6 +574,18 @@ export default function App() {
   }
   const allowedPages = (m: Message) =>
     new Set(m.context?.sources.map((s) => s.page) || []);
+  const visibleNotes = notes.filter(
+    (n) => showCrossPaperNotes || !paper || n.paper_id === paper.id,
+  );
+  async function openNoteSource(n: Note, targetPage?: number) {
+    const source = papers.find((p) => p.id === n.paper_id);
+    if (!source) return;
+    if (paper?.id !== source.id) await openPaper(source);
+    if (targetPage) {
+      setPage(targetPage);
+      setAnchor(n.anchor?.page === targetPage ? n.anchor : null);
+    }
+  }
   const dialogError = error && (
     <div role="alert" className="inline-error">
       {error}
@@ -681,11 +756,65 @@ export default function App() {
                   aria-label="新建主题"
                   title="新建主题"
                   onClick={() => {
+                    setEditingTopic(false);
                     setTopicTitle("");
                     topicDialog.current?.showModal();
                   }}
                 >
                   <Plus size={17} />
+                </button>
+                <button
+                  disabled={generating || !thread}
+                  aria-label="重命名主题"
+                  title="重命名主题"
+                  onClick={() => {
+                    if (!thread) return;
+                    setEditingTopic(true);
+                    setTopicTitle(thread.title);
+                    topicDialog.current?.showModal();
+                  }}
+                >
+                  <Pencil size={16} />
+                </button>
+                <button
+                  disabled={generating || busy || !thread}
+                  className="danger-icon"
+                  aria-label="删除主题"
+                  title="删除主题"
+                  onClick={() => void deleteTopic()}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            )}
+            {paper && (
+              <div className="summary-actions">
+                <span>
+                  <Sparkles size={14} /> 全篇辅助
+                </span>
+                <button
+                  disabled={generating || busy || !status?.key_configured}
+                  onClick={() =>
+                    void send({
+                      text: "生成阅读前概览",
+                      purpose: "pre-read",
+                      topicTitle: "阅读前概览",
+                    })
+                  }
+                >
+                  阅读前概览
+                </button>
+                <button
+                  disabled={generating || busy || !status?.key_configured}
+                  onClick={() =>
+                    void send({
+                      text: "生成阅读后总结",
+                      purpose: "post-read",
+                      topicTitle: "阅读后总结",
+                    })
+                  }
+                >
+                  阅读后总结
                 </button>
               </div>
             )}
@@ -778,14 +907,25 @@ export default function App() {
             )}
             {anchor && (
               <div className="selection-chip">
-                <button
-                  className="citation"
-                  onClick={() => cite(anchor.page, anchor)}
-                >
-                  p.{anchor.page} ·{" "}
-                  {anchor.kind === "region" ? "图表选区" : "文字选区"}
-                </button>
-                <p>{anchor.quote || "将发送此区域图像及同篇相关文字"}</p>
+                <div className="selection-title">
+                  <button
+                    className="citation"
+                    onClick={() => cite(anchor.page, anchor)}
+                  >
+                    p.{anchor.page} ·{" "}
+                    {anchor.kind === "region" ? "图表选区" : "文字选区"}
+                  </button>
+                  <span>将作为问题的直接原文依据</span>
+                </div>
+                <details>
+                  <summary>
+                    {anchor.quote ? "查看选中的原文" : "此区域没有可提取文字"}
+                  </summary>
+                  <p>
+                    {anchor.quote ||
+                      "将发送区域图像；补充文字仍按当前页、相邻页与问题关键词选择。"}
+                  </p>
+                </details>
                 <button
                   className="icon"
                   aria-label="清除选区"
@@ -800,14 +940,20 @@ export default function App() {
                 aria-label="向论文助手提问"
                 placeholder={
                   paper
-                    ? "问一个问题，或解释选中的内容…"
+                    ? anchor
+                      ? "针对选中的原文提问…"
+                      : "问一个问题，或先在左侧选中原文…"
                     : "打开论文后，围绕原文提问…"
                 }
                 disabled={!paper || generating}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
                     e.preventDefault();
                     void send();
                   }
@@ -843,7 +989,7 @@ export default function App() {
                     }
                     aria-label="发送问题"
                   >
-                    <ArrowUp size={18} />
+                    <ArrowUp size={18} /> <span>发送</span>
                   </button>
                 )}
               </div>
@@ -855,6 +1001,9 @@ export default function App() {
                   查看将发送的原文
                 </button>
                 <span>{config.model}</span>
+              </div>
+              <div className="keyboard-hint">
+                Enter 发送 · Shift + Enter 换行
               </div>
             </div>
             {status?.configured && !status.key_configured ? (
@@ -871,20 +1020,36 @@ export default function App() {
         ) : (
           <div className="notes-panel">
             <div className="notes-heading">
-              <span>已确认的理解</span>
-              {paper && notes.length > 0 && (
+              <span>全局笔记 · 已确认的理解</span>
+              {paper && visibleNotes.length > 0 && !showCrossPaperNotes && (
                 <a href={`/api/papers/${paper.id}/notes/export`} download>
                   导出 Markdown
                 </a>
               )}
             </div>
-            {notes.length ? (
-              notes.map((n) => (
+            {paper && (
+              <label className="notes-filter checkbox">
+                <input
+                  type="checkbox"
+                  checked={showCrossPaperNotes}
+                  onChange={(e) => setShowCrossPaperNotes(e.target.checked)}
+                />
+                跨论文显示
+              </label>
+            )}
+            {visibleNotes.length ? (
+              visibleNotes.map((n) => (
                 <article className="note" key={n.id}>
+                  <button
+                    className="note-paper"
+                    onClick={() => void openNoteSource(n)}
+                  >
+                    {n.paper_title || "来源论文"}
+                  </button>
                   {n.anchor && (
                     <button
                       className="citation"
-                      onClick={() => cite(n.anchor!.page, n.anchor)}
+                      onClick={() => void openNoteSource(n, n.anchor!.page)}
                     >
                       返回 p.{n.anchor.page}
                     </button>
@@ -894,12 +1059,12 @@ export default function App() {
                     allowed={
                       new Set(
                         Array.from(
-                          { length: paper?.page_count || 0 },
+                          { length: n.paper_page_count || 0 },
                           (_, i) => i + 1,
                         ),
                       )
                     }
-                    onCite={cite}
+                    onCite={(target) => void openNoteSource(n, target)}
                   />
                   <button onClick={() => stageNote(n)}>编辑笔记</button>
                 </article>
@@ -1141,7 +1306,7 @@ export default function App() {
       </dialog>
       <dialog ref={topicDialog}>
         <DialogTitle
-          title="新讨论主题"
+          title={editingTopic ? "重命名讨论主题" : "新讨论主题"}
           close={() => topicDialog.current?.close()}
         />
         {dialogError}
@@ -1163,7 +1328,7 @@ export default function App() {
           </label>
           <div className="dialog-actions">
             <button className="primary" disabled={!topicTitle.trim() || busy}>
-              开始讨论
+              {editingTopic ? "保存名称" : "开始讨论"}
             </button>
           </div>
         </form>
@@ -1200,18 +1365,37 @@ export default function App() {
         />
         {context && (
           <>
+            <p className="context-scope">{context.scope}</p>
             <p className="small muted">
-              {context.scope} · {context.characters.toLocaleString()} 字符 ·
-              最近 {context.history_messages} 条历史消息
+              普通提问先找选区段落，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
+              10 个段落、24,000 字符。全篇概览/总结逐页覆盖，超过 80,000
+              字符时按每页页首与页尾抽样。
+            </p>
+            <p className="small">
+              {context.coverage &&
+                `覆盖 ${context.coverage.pages_included.length} / ${context.coverage.total_pages} 个 PDF 页面 · `}
+              {context.characters.toLocaleString()} 字符 ·{" "}
+              {context.history_messages} 条历史消息
               {context.image_attached ? " · 含选区图像" : ""}
             </p>
-            {context.sources.map((s) => (
-              <details key={s.page}>
+            {context.sources.map((s, index) => (
+              <details key={`${s.page}-${index}`}>
                 <summary>
-                  {s.reason} · p.{s.page}
-                  {s.truncated ? " · 节选" : ""}
+                  <span>
+                    {s.reason} · PDF p.{s.page}
+                    {s.truncated ? " · 节选" : ""}
+                  </span>
                   <ChevronDown size={14} />
                 </summary>
+                <button
+                  className="context-jump"
+                  onClick={() => {
+                    cite(s.page);
+                    contextDialog.current?.close();
+                  }}
+                >
+                  跳到 PDF p.{s.page}
+                </button>
                 <pre>{s.text || "本页未提取到文字。图表请使用框选。"}</pre>
               </details>
             ))}
