@@ -8,11 +8,11 @@
 - 自定义本地工作目录；上传与 arXiv 搜索下载统一导入 `pdfs/`，按 SHA256 去重。
 - PDF.js 连续预览、目录、工具栏翻页、缩放、文字选择和区域截图；新回答按物理页码与页内片段引用并回跳，高亮可定位的原文片段。
 - 每篇论文多个主题对话，流式回答、停止生成、恢复阅读位置和最近主题。
-- 默认 Specialist，一次模型调用；Reader + Checker 显式选择，最多两次调用。
+- 默认 Specialist；Draft + Editor 显式选择，Reader draft 经 Editor 对照原文修订后才作为最终回答，审查记录默认折叠。
 - 原文上下文预览；按当前页、相邻页和词项相关性补充同篇片段，不自动外部搜索。
 - 对话自动保存，笔记手动确认、编辑、导出 Markdown。
 - DeepSeek 与 OpenAI-compatible provider 接口；默认 `deepseek-flash`（V4.1 Flash）。
-- 每次输出上限，usage 按调用步骤记录；失败不自动重试、不自动启动更多 agent。
+- 每次输出上限，run 按阶段保存 draft、review、状态与 usage；失败不自动重试、不自动启动更多 agent。
 
 ## 启动
 

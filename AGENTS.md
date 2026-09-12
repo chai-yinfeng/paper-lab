@@ -4,7 +4,8 @@ Use Chinese explanations; retain English technical terms, equations and necessar
 
 ## Current product
 - The main workflow is the local PDF reading UI (`web/src`) and Python application (`paper_lab`).
-- Default is one Specialist API call. Reader + Checker is explicitly selected and bounded to two calls.
+- Default is one Specialist API call. Draft + Editor is explicitly selected and bounded to two calls;
+  the final answer is edited automatically and the review trace stays collapsed.
 - Do not launch Codex subagents or full council for ordinary reading or repository maintenance.
 - `.agents/skills/paper-council` and `paper-discovery`, plus the old `scripts/*.py`, are legacy protocols.
   Consult them only for an explicit legacy council/discovery request. They are not the new app runtime.

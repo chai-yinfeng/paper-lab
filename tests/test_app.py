@@ -6,6 +6,7 @@ import io
 import os
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -133,6 +134,31 @@ class ContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderSettings(base_url="http://api.deepseek.com")
 
+    def test_v1_store_migrates_runs_to_structured_trace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old.sqlite3"
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                CREATE TABLE runs (
+                 id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, message_id TEXT NOT NULL,
+                 workflow TEXT NOT NULL, status TEXT NOT NULL, provider TEXT NOT NULL,
+                 model TEXT NOT NULL, usage TEXT, error TEXT, created_at TEXT NOT NULL,
+                 finished_at TEXT);
+                PRAGMA user_version=1;
+                """
+            )
+            conn.close()
+            migrated = Store(path)
+            try:
+                columns = [row[1] for row in migrated.conn.execute("PRAGMA table_info(runs)")]
+                self.assertIn("trace", columns)
+                self.assertEqual(
+                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 2
+                )
+            finally:
+                migrated.close()
+
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -253,7 +279,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         with patch("paper_lab.api.stream_completion", fake):
             response = await self.client.post(
                 "/api/threads/topic/messages",
-                json={"question": "总结", "purpose": "pre-read", "workflow": "reader-checker"},
+                json={"question": "总结", "purpose": "pre-read", "workflow": "draft-editor"},
             )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(calls), 1)
@@ -324,7 +350,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.app.state.workspace = workspace
 
     async def test_single_and_pair_have_bounded_calls_and_saved_usage(self):
-        for workflow, count in [("specialist", 1), ("reader-checker", 2)]:
+        for workflow, count in [("specialist", 1), ("draft-editor", 2)]:
             calls = []
 
             async def fake(settings, key, messages):
@@ -350,7 +376,36 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.db.all("SELECT * FROM notes"), [])
             self.assertFalse(self.app.state.active)
 
-    async def test_truncation_prevents_checker_and_preserves_partial(self):
+    async def test_draft_editor_saves_trace_and_only_publishes_final(self):
+        calls = []
+
+        async def fake(settings, key, messages):
+            calls.append(messages)
+            text = (
+                "Reader draft [p.1 ¶1]."
+                if len(calls) == 1
+                else "<review>修正了一个前提。</review><final>Edited final [p.1 ¶1].</final>"
+            )
+            yield {"type": "delta", "text": text}
+            yield {"type": "model", "model": "deepseek-flash"}
+            yield {"type": "finish", "reason": "stop"}
+
+        with patch("paper_lab.api.stream_completion", fake):
+            response = await self.client.post(
+                "/api/threads/topic/messages",
+                json={"question": "Explain", "workflow": "draft-editor"},
+            )
+        events = [json.loads(line) for line in response.text.splitlines()]
+        deltas = [event["text"] for event in events if event["type"] == "delta"]
+        self.assertEqual(deltas, ["Edited final [p.1 ¶1]."])
+        message = self.db.one("SELECT * FROM messages WHERE role='assistant'")
+        self.assertEqual(message["content"], "Edited final [p.1 ¶1].")
+        run = (await self.client.get("/api/threads/topic/runs")).json()[0]
+        self.assertEqual(run["workflow"], "draft-editor")
+        self.assertEqual(run["trace"]["stages"][0]["content"], "Reader draft [p.1 ¶1].")
+        self.assertEqual(run["trace"]["stages"][1]["content"], "修正了一个前提。")
+
+    async def test_truncation_prevents_editor_and_preserves_partial(self):
         async def fake(*args):
             yield {"type": "delta", "text": "partial"}
             yield {"type": "finish", "reason": "length"}
@@ -358,7 +413,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         with patch("paper_lab.api.stream_completion", fake):
             r = await self.client.post(
                 "/api/threads/topic/messages",
-                json={"question": "Explain", "workflow": "reader-checker"},
+                json={"question": "Explain", "workflow": "draft-editor"},
             )
         final = json.loads(r.text.splitlines()[-1])
         self.assertEqual(final["status"], "truncated")

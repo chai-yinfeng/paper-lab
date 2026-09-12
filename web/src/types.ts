@@ -75,14 +75,29 @@ export type Status = {
 };
 export type Run = {
   id: string;
+  message_id: string;
+  workflow: string;
   status: string;
+  provider: string;
+  model: string;
   error: string | null;
+  trace:
+    | {
+        schema_version: number;
+        stages: {
+          phase: string;
+          status: string;
+          model: string;
+          content: string;
+        }[];
+      }
+    | null;
   usage:
     | {
         phase: string;
         model: string;
         tokens: Record<string, number> | null;
-        finish_reason: string;
+        finish_reason: string | null;
       }[]
     | null;
 };

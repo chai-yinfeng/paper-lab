@@ -17,7 +17,9 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
 - `messages`: user or assistant content, PDF anchor, context snapshot, model and completion status.
 - `notes`: explicit user-confirmed text, optional source message and anchor. The notebook is global and can show
   one paper or every paper, while retaining paper provenance for source jumps. AI responses never insert notes.
-- `runs`: workflow, provider, requested model, actual returned model per step, usage and completion/error status.
+- `runs`: workflow, provider, requested model, structured stage trace, actual returned model per step,
+  usage and completion/error status. Draft + Editor keeps the Reader draft and Editor review in the trace;
+  the linked assistant message contains only the edited final answer.
 - `settings`: provider configuration and resume pointers, never API secrets.
 
 SQLite foreign keys and transactions protect relationships. `PRAGMA user_version` is the migration boundary;
@@ -43,8 +45,8 @@ stop the application before copying it. No automatic migration of previous counc
 8. Reading-before and reading-after summaries each use one Specialist call and send all extracted text without an
    application character cap. The selected provider's context window remains the hard limit. Paper claims require
    page citations. Unsearched model knowledge is explicitly labeled external background.
-9. The reader supports normal scrolling within a page, wheel/trackpad page turns at vertical edges, horizontal
-   swipes, touch swipes and PageUp/PageDown or left/right keys.
+9. The reader uses continuous vertical scrolling. Toolbar buttons and page-number input provide explicit page jumps;
+   horizontal trackpad gestures do not turn pages.
 
 The context builder is deterministic; it is not semantic retrieval and cannot guarantee finding every relevant
 definition, especially for Chinese questions about English text. Full-paper summaries send every extracted page;
@@ -58,8 +60,9 @@ provider defaults expanding cost unexpectedly; users can enable low/high thinkin
 per call by default and is configurable from 256 to 16384.
 
 - Specialist: one streaming Chat Completions call.
-- Reader + Checker: at most two calls. The second checks a bounded draft against the same supplied original
-  excerpts/image, without a moderator or automatic revision loop. A truncated/failed reader does not start a checker.
+- Draft + Editor: at most two calls. Reader creates a private draft; Editor checks it against the same supplied
+  excerpts/image and returns the complete corrected answer. The draft and review remain in a structured, collapsed
+  trace. A truncated or failed Reader does not start Editor, and no paid request is retried automatically.
 - Full council: retained in legacy skills, not run automatically or exposed as a nonfunctional UI option.
 
 Provider adapters normalize stream deltas, completion reasons and usage. No billable request is automatically

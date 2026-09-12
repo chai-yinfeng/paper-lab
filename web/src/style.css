@@ -633,6 +633,43 @@ a {
   padding: 2px 0;
   color: #6f8166;
 }
+.review-trace {
+  margin-top: 16px;
+  border: 1px solid #dfe6d9;
+  border-radius: 7px;
+  background: #f8faf5;
+  color: #65745e;
+  font-size: 12px;
+}
+.review-trace > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  cursor: pointer;
+}
+.review-trace > summary span {
+  color: #899583;
+}
+.review-trace section {
+  padding: 11px 13px;
+  border-top: 1px solid #e4e9df;
+}
+.review-trace section > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+  color: #71806a;
+}
+.review-trace section > header span {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.review-trace .markdown {
+  font-size: 13px;
+  line-height: 1.65;
+}
 .generating {
   padding: 10px 25px;
   font-size: 13px;

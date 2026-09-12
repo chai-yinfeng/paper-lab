@@ -541,9 +541,11 @@ export default function App() {
           }
           if (event.type === "phase")
             setPhase(
-              event.phase === "checker"
-                ? "Checker 正在核查"
-                : "Specialist 正在阅读",
+              event.phase === "editor"
+                ? "Editor 正在核查并修订"
+                : event.phase === "draft"
+                  ? "Reader 正在形成 draft"
+                  : "Specialist 正在阅读",
             );
           if (event.type === "thinking") setPhase("模型正在思考");
           if (event.type === "error") setError(event.message);
@@ -973,7 +975,9 @@ export default function App() {
             )}
             <div className="messages">
               {messages.length ? (
-                messages.map((m) => (
+                messages.map((m) => {
+                  const run = runs.find((candidate) => candidate.message_id === m.id);
+                  return (
                   <article key={m.id} className={"message " + m.role}>
                     <div className="message-label">
                       {m.role === "user" ? "你" : m.model || "Specialist"}
@@ -996,6 +1000,35 @@ export default function App() {
                         onCite={cite}
                       />
                     )}{" "}
+                    {m.role === "assistant" &&
+                      run?.workflow === "draft-editor" &&
+                      run.trace && (
+                        <details className="review-trace">
+                          <summary>
+                            审查记录 · Draft → Editor
+                            <span>{run.status === "complete" ? "已完成" : run.status}</span>
+                          </summary>
+                          {run.trace.stages.map((stage, index) => (
+                            <section key={`${stage.phase}-${index}`}>
+                              <header>
+                                <strong>
+                                  {stage.phase === "draft" ? "Reader draft" : "Editor review"}
+                                </strong>
+                                <span>{stage.model} · {stage.status}</span>
+                              </header>
+                              {stage.content ? (
+                                <Markdown
+                                  content={stage.content}
+                                  sources={m.context?.sources || []}
+                                  onCite={cite}
+                                />
+                              ) : (
+                                <p className="muted">这一阶段没有保存可显示的内容。</p>
+                              )}
+                            </section>
+                          ))}
+                        </details>
+                      )}
                     {m.role === "assistant" && m.content && (
                       <div className="message-actions">
                         <button
@@ -1024,7 +1057,8 @@ export default function App() {
                       </div>
                     )}
                   </article>
-                ))
+                  );
+                })
               ) : (
                 <div className="conversation-empty">
                   <span className="eyebrow">SPECIALIST</span>
@@ -1132,7 +1166,7 @@ export default function App() {
                   onChange={(e) => setWorkflow(e.target.value)}
                 >
                   <option value="specialist">Specialist</option>
-                  <option value="reader-checker">Reader + Checker</option>
+                  <option value="draft-editor">Draft + Editor</option>
                 </select>
                 <button
                   type="button"
@@ -1589,10 +1623,9 @@ export default function App() {
           </p>
         </article>
         <article>
-          <h3>Reader + Checker</h3>
+          <h3>Draft + Editor</h3>
           <p>
-            Reader 先形成解释，Checker
-            再对照同一批原文检查事实错误、遗漏和前提。适合最新结果、证据链复杂或你希望额外审查的内容，会使用更多时间与模型额度。
+            Reader 先形成 draft，Editor 再对照同一批原文核查并修订。对话只显示修订后的最终回答；draft 和审查事项保存在默认折叠的审查记录中。适合最新结果、证据链复杂或你希望额外审查的内容。
           </p>
         </article>
         <p className="small muted">

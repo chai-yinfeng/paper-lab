@@ -33,7 +33,7 @@ Megatron-LM 为首篇；使用 Git，后续同步 GitHub。
 ## 2026-09-11：设计方向更新
 
 以上为旧版历史设计，后续以本节为准。内置对话作为主要入口，支持通用 LLM API；
-默认 Specialist，Reader + Checker 按需运行，完整 council 保留为显式选项。
+默认 Specialist，Draft + Editor 按需运行，完整 council 保留为显式选项。
 用户论文、scheme、对话、笔记和阅读状态不进入 GitHub。数据目录可由用户指定，
 实现与测试前由用户指定临时测试数据目录，当前不执行真实论文验证。
 Megatron-LM 旧版阅读产出及其验收记录已移除，并重建 Git 发布历史。
@@ -42,6 +42,6 @@ UI、provider 接口及可配置数据目录尚未实现。
 ## v0.2 实现
 
 已实现本地 FastAPI + SQLite + React/PDF.js 阅读工作台，独立于 Codex runtime。
-数据目录由用户选择；PDF 统一存入 pdfs/；默认 Specialist 与显式 Reader + Checker。
+数据目录由用户选择；PDF 统一存入 pdfs/；默认 Specialist 与显式 Draft + Editor。
 对话多主题，笔记手动确认。DeepSeek 官方 API 名称 deepseek-flash（V4.1 Flash）。
 旧版 council 仅保留协议。实现范围与待验证项目见 architecture/local-reader.md。

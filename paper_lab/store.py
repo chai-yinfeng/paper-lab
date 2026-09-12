@@ -42,11 +42,12 @@ CREATE INDEX IF NOT EXISTS notes_paper ON notes(paper_id, updated_at);
 CREATE TABLE IF NOT EXISTS runs (
  id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id), message_id TEXT NOT NULL REFERENCES messages(id),
  workflow TEXT NOT NULL, status TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
- usage TEXT, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);
+ usage TEXT, trace TEXT, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);
 CREATE INDEX IF NOT EXISTS runs_thread ON runs(thread_id, created_at);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-PRAGMA user_version=1;
 """
+
+SCHEMA_VERSION = 2
 
 
 class Store:
@@ -57,11 +58,14 @@ class Store:
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA busy_timeout=5000")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 1:
+        if version > SCHEMA_VERSION:
             self.conn.close()
             raise ValueError("工作目录来自更新版本，请升级 Paper Lab。")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        if version == 1:
+            self.conn.execute("ALTER TABLE runs ADD COLUMN trace TEXT")
+        self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         # A process crash must never leave a conversation apparently generating forever.
         with self.conn:
             self.conn.execute(
@@ -102,7 +106,7 @@ class Store:
 
 def decoded(row):
     result = dict(row)
-    for key in ("anchor", "context", "usage", "source", "words"):
+    for key in ("anchor", "context", "usage", "trace", "source", "words"):
         if key in result and result[key] is not None:
             result[key] = json.loads(result[key])
     return result
