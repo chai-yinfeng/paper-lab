@@ -16,7 +16,15 @@ export type Paper = {
 };
 export type Thread = { id: string; title: string };
 export type Context = {
-  sources: { page: number; text: string; reason: string; truncated: boolean }[];
+  sources: {
+    page: number;
+    paragraph?: number;
+    citation?: string;
+    text: string;
+    reason: string;
+    truncated: boolean;
+    anchor?: Anchor | null;
+  }[];
   characters: number;
   history_messages: number;
   scope: string;

@@ -77,6 +77,15 @@ export default function App() {
           Number(localStorage.getItem("paper-lab-discussion-width")) || 410,
         ),
       ),
+    ),
+    [composerHeight, setComposerHeight] = useState(() =>
+      Math.min(
+        520,
+        Math.max(
+          160,
+          Number(localStorage.getItem("paper-lab-composer-height")) || 230,
+        ),
+      ),
     );
   const settings = useRef<HTMLDialogElement>(null),
     importDialog = useRef<HTMLDialogElement>(null),
@@ -85,7 +94,7 @@ export default function App() {
     contextDialog = useRef<HTMLDialogElement>(null),
     workflowDialog = useRef<HTMLDialogElement>(null),
     layout = useRef<HTMLDivElement>(null),
-    composing = useRef(false),
+    discussion = useRef<HTMLElement>(null),
     bottom = useRef<HTMLDivElement>(null);
   const [directory, setDirectory] = useState(
       () => localStorage.getItem("paper-lab-directory") || "",
@@ -594,8 +603,6 @@ export default function App() {
       setBusy(false);
     }
   }
-  const allowedPages = (m: Message) =>
-    new Set(m.context?.sources.map((s) => s.page) || []);
   const visibleNotes = notes.filter(
     (n) => showCrossPaperNotes || !paper || n.paper_id === paper.id,
   );
@@ -656,6 +663,49 @@ export default function App() {
     };
     const stop = () => {
       document.body.classList.remove("resizing-columns");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", stop, { once: true });
+  }
+  function resizeComposerBy(delta: number) {
+    const maximum = Math.max(
+      160,
+      Math.min(
+        520,
+        (discussion.current?.clientHeight || window.innerHeight) - 260,
+      ),
+    );
+    const next = Math.min(maximum, Math.max(160, composerHeight - delta));
+    setComposerHeight(next);
+    localStorage.setItem("paper-lab-composer-height", String(next));
+  }
+  function startComposerResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 800) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = composerHeight;
+    const maximum = Math.max(
+      160,
+      Math.min(
+        520,
+        (discussion.current?.clientHeight || window.innerHeight) - 260,
+      ),
+    );
+    document.body.classList.add("resizing-rows");
+    const move = (e: PointerEvent) => {
+      const next = Math.min(
+        maximum,
+        Math.max(160, startHeight - (e.clientY - startY)),
+      );
+      setComposerHeight(next);
+      localStorage.setItem("paper-lab-composer-height", String(next));
+    };
+    const stop = () => {
+      document.body.classList.remove("resizing-rows");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
@@ -731,6 +781,7 @@ export default function App() {
         </button>
       </aside>
       <ResizeHandle
+        className="library-resizer"
         label="调整论文列表宽度"
         value={libraryWidth}
         hidden={collapsed}
@@ -799,12 +850,13 @@ export default function App() {
         )}
       </main>
       <ResizeHandle
+        className="discussion-resizer"
         label="调整对话栏宽度"
         value={discussionWidth}
         onPointerDown={(e) => startResize("discussion", e)}
         onKey={(delta) => resizeBy("discussion", delta)}
       />
-      <aside className="discussion">
+      <aside className="discussion" ref={discussion}>
         <header>
           <button
             className={tab === "chat" ? "tab active" : "tab"}
@@ -939,7 +991,7 @@ export default function App() {
                     ) : (
                       <Markdown
                         content={m.content}
-                        allowed={allowedPages(m)}
+                        sources={m.context?.sources || []}
                         onCite={cite}
                       />
                     )}{" "}
@@ -1035,7 +1087,19 @@ export default function App() {
                 </button>
               </div>
             )}
-            <div className="composer">
+            <HorizontalResizeHandle
+              value={composerHeight}
+              onPointerDown={startComposerResize}
+              onKey={resizeComposerBy}
+            />
+            <div
+              className="composer"
+              style={
+                {
+                  "--composer-height": `${composerHeight}px`,
+                } as React.CSSProperties
+              }
+            >
               <textarea
                 aria-label="向论文助手提问"
                 placeholder={
@@ -1048,19 +1112,11 @@ export default function App() {
                 disabled={!paper || generating}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                onCompositionStart={() => {
-                  composing.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composing.current = false;
-                }}
                 onKeyDown={(e) => {
                   if (
                     e.key === "Enter" &&
                     !e.shiftKey &&
-                    !composing.current &&
-                    !e.nativeEvent.isComposing &&
-                    e.nativeEvent.keyCode !== 229
+                    !e.nativeEvent.isComposing
                   ) {
                     e.preventDefault();
                     void send();
@@ -1171,7 +1227,8 @@ export default function App() {
                   )}
                   <Markdown
                     content={n.content}
-                    allowed={
+                    sources={[]}
+                    allowedPages={
                       new Set(
                         Array.from(
                           { length: n.paper_page_count || 0 },
@@ -1483,7 +1540,7 @@ export default function App() {
             <p className="context-scope">{context.scope}</p>
             <p className="small muted">
               普通提问先找选区段落，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
-              10 个段落、24,000
+              10 个原文片段、24,000
               字符。全篇概览/总结发送全部可提取文字，不设应用侧字符上限；最终仍受所选模型的
               context window 限制。
             </p>
@@ -1498,7 +1555,8 @@ export default function App() {
               <details key={`${s.page}-${index}`}>
                 <summary>
                   <span>
-                    {s.reason} · PDF p.{s.page}
+                    {s.reason} ·{" "}
+                    {s.citation ? `[${s.citation}]` : `PDF p.${s.page}`}
                     {s.truncated ? " · 节选" : ""}
                   </span>
                   <ChevronDown size={14} />
@@ -1506,11 +1564,11 @@ export default function App() {
                 <button
                   className="context-jump"
                   onClick={() => {
-                    cite(s.page);
+                    cite(s.page, s.anchor);
                     contextDialog.current?.close();
                   }}
                 >
-                  跳到 PDF p.{s.page}
+                  跳到 PDF {s.citation ? `[${s.citation}]` : `p.${s.page}`}
                 </button>
                 <pre>{s.text || "本页未提取到文字。图表请使用框选。"}</pre>
               </details>
@@ -1544,12 +1602,14 @@ export default function App() {
   );
 }
 function ResizeHandle({
+  className,
   label,
   value,
   hidden = false,
   onPointerDown,
   onKey,
 }: {
+  className: string;
   label: string;
   value: number;
   hidden?: boolean;
@@ -1558,7 +1618,7 @@ function ResizeHandle({
 }) {
   return (
     <div
-      className={"resize-handle" + (hidden ? " hidden" : "")}
+      className={`resize-handle ${className}` + (hidden ? " hidden" : "")}
       role="separator"
       aria-label={label}
       aria-orientation="vertical"
@@ -1569,6 +1629,33 @@ function ResizeHandle({
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           e.preventDefault();
           onKey(e.key === "ArrowRight" ? 12 : -12);
+        }
+      }}
+    />
+  );
+}
+function HorizontalResizeHandle({
+  value,
+  onPointerDown,
+  onKey,
+}: {
+  value: number;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onKey: (delta: number) => void;
+}) {
+  return (
+    <div
+      className="row-resize-handle"
+      role="separator"
+      aria-label="调整问题输入区高度"
+      aria-orientation="horizontal"
+      aria-valuenow={Math.round(value)}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          onKey(e.key === "ArrowDown" ? 12 : -12);
         }
       }}
     />
@@ -1586,16 +1673,26 @@ function DialogTitle({ title, close }: { title: string; close: () => void }) {
 }
 function Markdown({
   content,
-  allowed,
+  sources,
+  allowedPages,
   onCite,
 }: {
   content: string;
-  allowed: Set<number>;
-  onCite: (n: number) => void;
+  sources: Context["sources"];
+  allowedPages?: Set<number>;
+  onCite: (n: number, anchor?: Anchor | null) => void;
 }) {
-  const linked = content.replace(/\[p\.(\d+)\]/g, (match, n) =>
-    allowed.has(Number(n)) ? `[p.${n}](#pdf-page-${n})` : match,
-  );
+  const allowed = allowedPages || new Set(sources.map((source) => source.page));
+  const linked = content
+    .replace(/\[p\.(\d+)\s+¶(\d+)\]/g, (match) => {
+      const index = sources.findIndex(
+        (source) => `[${source.citation}]` === match,
+      );
+      return index >= 0 ? `${match}(#pdf-source-${index})` : match;
+    })
+    .replace(/\[p\.(\d+)\]/g, (match, n) =>
+      allowed.has(Number(n)) ? `[p.${n}](#pdf-page-${n})` : match,
+    );
   return (
     <div className="markdown">
       <ReactMarkdown
@@ -1606,7 +1703,17 @@ function Markdown({
             <span className="muted">[图像：{alt || "请回看原文"}]</span>
           ),
           a: ({ href, children }) =>
-            href?.startsWith("#pdf-page-") ? (
+            href?.startsWith("#pdf-source-") ? (
+              <button
+                className="citation"
+                onClick={() => {
+                  const source = sources[Number(href.slice(12))];
+                  if (source) onCite(source.page, source.anchor);
+                }}
+              >
+                {children}
+              </button>
+            ) : href?.startsWith("#pdf-page-") ? (
               <button
                 className="citation"
                 onClick={() => onCite(Number(href.slice(10)))}

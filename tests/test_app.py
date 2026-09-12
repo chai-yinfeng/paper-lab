@@ -64,10 +64,28 @@ class ContextTests(unittest.TestCase):
         )
         self.assertLessEqual(packet["characters"], 9000)
         self.assertEqual(packet["sources"][0]["page"], 1)
-        self.assertIn("[p.1]", messages[-1]["content"])
+        self.assertIn("[p.1 ¶1]", messages[-1]["content"])
         self.assertEqual(len(messages), 2)
         self.assertEqual(packet["sources"][0]["reason"], "当前页相关段落")
         self.assertEqual(packet["coverage"]["total_pages"], 3)
+
+    def test_context_citation_locates_extracted_words(self):
+        words = [
+            {"text": "matrix", "rect": [0.1, 0.2, 0.2, 0.22]},
+            {"text": "definition", "rect": [0.21, 0.2, 0.34, 0.22]},
+        ] * 8
+        self.db.execute(
+            "UPDATE pages SET words=? WHERE paper_id=? AND number=1",
+            (json.dumps(words), "paper"),
+        )
+        packet, messages = build_context(
+            self.db, self.paper, "topic", "matrix definition", None, budget=9000
+        )
+        source = packet["sources"][0]
+        self.assertEqual(source["citation"], "p.1 ¶1")
+        self.assertEqual(source["anchor"]["kind"], "text")
+        self.assertEqual(source["anchor"]["rects"][0], [0.1, 0.2, 0.2, 0.22])
+        self.assertIn("[p.1 ¶1]", messages[-1]["content"])
 
     def test_full_summary_sends_all_extracted_text_without_app_cap(self):
         packet, messages = build_summary_context(
@@ -77,7 +95,7 @@ class ContextTests(unittest.TestCase):
         self.assertGreater(packet["characters"], 6000)
         self.assertTrue(packet["coverage"]["complete_text"])
         self.assertIn("未做字符截断", packet["scope"])
-        self.assertIn("[p.3]", messages[-1]["content"])
+        self.assertIn("[p.3 ¶1]", messages[-1]["content"])
         self.assertNotIn("覆盖范围：", messages[-1]["content"])
         self.assertIn("直接进入论文内容", messages[0]["content"])
         self.assertIn("外部背景（未检索）", messages[0]["content"])
