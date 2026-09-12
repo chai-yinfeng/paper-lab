@@ -113,32 +113,20 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
     return packet, messages
 
 
-def build_summary_context(db, paper, thread_id, purpose, budget=80000):
+def build_summary_context(db, paper, thread_id, purpose):
     pages = db.all("SELECT * FROM pages WHERE paper_id=? ORDER BY number", (paper["id"],))
     if not pages:
         raise ValueError("论文尚无可读取页面。")
-    per_page = max(900, budget // len(pages))
     sources, used = [], 0
     for p in pages:
-        if used >= budget:
-            break
-        text, limit = p["text"], min(per_page, budget - used)
-        if len(text) <= limit:
-            excerpt = text
-        else:
-            marker = "\n[…本页中部省略…]\n"
-            head = (limit - len(marker)) * 2 // 3
-            tail = limit - len(marker) - head
-            excerpt = text[:head] + marker + text[-tail:]
-        sources.append({"page": p["number"], "text": excerpt,
-                        "reason": "全篇逐页输入" if len(text) <= limit else "全篇逐页抽样",
-                        "truncated": len(text) > limit})
-        used += len(excerpt)
+        text = p["text"]
+        sources.append({"page": p["number"], "text": text,
+                        "reason": "全篇逐页输入", "truncated": False})
+        used += len(text)
     nonempty = sum(bool(p["text"].strip()) for p in pages)
-    complete = (len(sources) == len(pages) and nonempty == len(pages)
-                and not any(s["truncated"] for s in sources))
-    scope = ("已提供全部可提取正文" if complete else
-             f"逐页覆盖 {len(sources)}/{len(pages)} 页，其中 {nonempty} 页有可提取文字；长页按页首与页尾抽样")
+    complete = nonempty == len(pages)
+    scope = ("已提供全部可提取正文；Paper Lab 未做字符截断" if complete else
+             f"已提供全部可提取正文；{len(pages)} 页中有 {nonempty} 页包含文字，Paper Lab 未做字符截断")
     packet = {
         "sha256": paper["sha256"], "anchor": None, "sources": sources,
         "history_messages": 0, "characters": used, "scope": scope,

@@ -40,15 +40,15 @@ stop the application before copying it. No automatic migration of previous counc
 6. Answers use `[p.N]`; only supplied source pages become clickable citations. These are locators, not proof
    that a generated claim is true. Saved user anchors restore highlights; generated page citations return to a page.
 7. The user confirms/edits an answer to create a note. Reading position and selected topic can be resumed.
-8. Reading-before and reading-after summaries each use one Specialist call. Up to 80,000 extracted characters
-   are distributed across every physical page; long pages retain their beginning and end and disclose sampling.
-   Paper claims require page citations. Unsearched model knowledge is explicitly labeled external background.
+8. Reading-before and reading-after summaries each use one Specialist call and send all extracted text without an
+   application character cap. The selected provider's context window remains the hard limit. Paper claims require
+   page citations. Unsearched model knowledge is explicitly labeled external background.
 9. The reader supports normal scrolling within a page, wheel/trackpad page turns at vertical edges, horizontal
    swipes, touch swipes and PageUp/PageDown or left/right keys.
 
 The context builder is deterministic; it is not semantic retrieval and cannot guarantee finding every relevant
-definition, especially for Chinese questions about English text. Full-paper summaries are complete only when all
-extracted text fits the stated budget; otherwise they are page-balanced summaries with disclosed sampling.
+definition, especially for Chinese questions about English text. Full-paper summaries send every extracted page;
+scanned pages without text still require OCR or a future multimodal whole-document path.
 
 ## Model boundary and workflow
 

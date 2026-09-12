@@ -75,6 +75,7 @@ async def stream_completion(
             if response.status_code != 200:
                 # Do not persist upstream error bodies, which can contain request data.
                 hint = {
+                    400: "模型拒绝了请求；全文输入可能超过该模型的 context window，或请求参数不被支持。",
                     401: "API key 无效或已失效。",
                     402: "API 余额不足。",
                     429: "API 请求受限，请稍后重试。",

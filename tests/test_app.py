@@ -69,14 +69,14 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(packet["sources"][0]["reason"], "当前页相关段落")
         self.assertEqual(packet["coverage"]["total_pages"], 3)
 
-    def test_full_summary_covers_every_page_and_discloses_sampling(self):
+    def test_full_summary_sends_all_extracted_text_without_app_cap(self):
         packet, messages = build_summary_context(
-            self.db, self.paper, "topic", "post-read", budget=6000
+            self.db, self.paper, "topic", "post-read"
         )
         self.assertEqual(packet["coverage"]["pages_included"], [1, 2, 3])
-        self.assertLessEqual(packet["characters"], 6000)
-        self.assertFalse(packet["coverage"]["complete_text"])
-        self.assertIn("逐页覆盖 3/3 页", packet["scope"])
+        self.assertGreater(packet["characters"], 6000)
+        self.assertTrue(packet["coverage"]["complete_text"])
+        self.assertIn("未做字符截断", packet["scope"])
         self.assertIn("[p.3]", messages[-1]["content"])
         self.assertIn("外部背景（未检索）", messages[0]["content"])
 

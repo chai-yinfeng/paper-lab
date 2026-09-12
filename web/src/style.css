@@ -1075,6 +1075,18 @@ hr {
 .pdf-scroll:focus-visible {
   box-shadow: inset 0 0 0 2px #708e66;
 }
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: max-content;
+}
+.pdf-page-shell {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  scroll-margin-top: 12px;
+}
 .notes-filter {
   margin: 10px 0 0;
   font-size: 12px;

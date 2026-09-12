@@ -202,10 +202,10 @@ export default function App() {
       await api("/session", "PUT", { paper_id: p.id, thread_id: selected.id });
     } else await api("/session", "PUT", { paper_id: p.id });
   }
-  function changePage(n: number) {
+  function changePage(n: number, clearAnchor = true) {
     if (!paper) return;
     setPage(n);
-    setAnchor(null);
+    if (clearAnchor) setAnchor(null);
     if (positionTimer.current) clearTimeout(positionTimer.current);
     const p = paper;
     setPapers((old) =>
@@ -1368,8 +1368,9 @@ export default function App() {
             <p className="context-scope">{context.scope}</p>
             <p className="small muted">
               普通提问先找选区段落，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
-              10 个段落、24,000 字符。全篇概览/总结逐页覆盖，超过 80,000
-              字符时按每页页首与页尾抽样。
+              10 个段落、24,000
+              字符。全篇概览/总结发送全部可提取文字，不设应用侧字符上限；最终仍受所选模型的
+              context window 限制。
             </p>
             <p className="small">
               {context.coverage &&

@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type WheelEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+  type WheelEvent,
+} from "react";
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -29,7 +36,7 @@ export default function PdfReader({
 }: {
   paper: Paper;
   page: number;
-  setPage: (p: number) => void;
+  setPage: (p: number, clearAnchor?: boolean) => void;
   anchor: Anchor | null;
   onSelect: (a: Anchor) => void;
   onError: (e: string) => void;
@@ -38,10 +45,14 @@ export default function PdfReader({
     [width, setWidth] = useState(650),
     [zoom, setZoom] = useState(1),
     [region, setRegion] = useState(false),
+    [ratios, setRatios] = useState<number[]>([]),
     [outline, setOutline] = useState<{ title: string; dest: unknown }[]>([]),
     [showOutline, setShowOutline] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
-  const wheel = useRef({ amount: 0, last: 0, turned: 0 });
+  const pageElements = useRef(new Map<number, HTMLDivElement>());
+  const internalPage = useRef<number | null>(null);
+  const scrollFrame = useRef<number | null>(null);
+  const wheel = useRef({ amount: 0, last: 0, handled: false });
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     let active = true;
@@ -56,11 +67,22 @@ export default function PdfReader({
       .then(async (value) => {
         if (!active) return;
         setDoc(value);
-        const items = await value.getOutline();
-        if (active)
+        const [items, pageRatios] = await Promise.all([
+          value.getOutline(),
+          Promise.all(
+            Array.from({ length: value.numPages }, async (_, index) => {
+              const pdfPage = await value.getPage(index + 1);
+              const viewport = pdfPage.getViewport({ scale: 1 });
+              return viewport.height / viewport.width;
+            }),
+          ),
+        ]);
+        if (active) {
           setOutline(
             (items || []).map((i) => ({ title: i.title, dest: i.dest })),
           );
+          setRatios(pageRatios);
+        }
       })
       .catch((e) => {
         if (active) onError("PDF 无法打开：" + e.message);
@@ -68,6 +90,7 @@ export default function PdfReader({
     return () => {
       active = false;
       setDoc(null);
+      setRatios([]);
       void task.destroy();
     };
   }, [paper.id]);
@@ -81,35 +104,37 @@ export default function PdfReader({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (scroll.current) {
-      scroll.current.scrollTop = 0;
-      scroll.current.scrollLeft = 0;
-    }
-  }, [page]);
-  function turn(direction: -1 | 1) {
-    const next = page + direction;
-    if (next >= 1 && next <= paper.page_count) setPage(next);
-  }
-  function onWheel(e: WheelEvent<HTMLDivElement>) {
-    const element = e.currentTarget;
-    const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
-    const delta = horizontal ? e.deltaX : e.deltaY;
-    const atStart = element.scrollTop <= 1;
-    const atEnd =
-      element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
-    if (!horizontal && !((delta < 0 && atStart) || (delta > 0 && atEnd)))
+    if (!ratios.length) return;
+    if (internalPage.current === page) {
+      internalPage.current = null;
       return;
+    }
+    requestAnimationFrame(() =>
+      pageElements.current.get(page)?.scrollIntoView({ block: "start" }),
+    );
+  }, [page, ratios.length, width, zoom]);
+  function goTo(target: number, behavior: ScrollBehavior = "smooth") {
+    if (target < 1 || target > paper.page_count) return;
+    setPage(target);
+    pageElements.current
+      .get(target)
+      ?.scrollIntoView({ block: "start", behavior });
+  }
+  function onHorizontalWheel(e: WheelEvent<HTMLDivElement>) {
+    const element = e.currentTarget;
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+    if (element.scrollWidth > element.clientWidth + 2) return;
     const now = Date.now();
-    if (now - wheel.current.last > 220) wheel.current.amount = 0;
+    if (now - wheel.current.last > 180) {
+      wheel.current.amount = 0;
+      wheel.current.handled = false;
+    }
     wheel.current.last = now;
-    wheel.current.amount += delta;
-    if (
-      Math.abs(wheel.current.amount) > 90 &&
-      now - wheel.current.turned > 550
-    ) {
+    wheel.current.amount += e.deltaX;
+    if (Math.abs(wheel.current.amount) > 90 && !wheel.current.handled) {
       e.preventDefault();
-      turn(wheel.current.amount > 0 ? 1 : -1);
-      wheel.current = { amount: 0, last: now, turned: now };
+      wheel.current.handled = true;
+      goTo(page + (wheel.current.amount > 0 ? 1 : -1));
     }
   }
   async function jump(dest: unknown) {
@@ -122,7 +147,7 @@ export default function PdfReader({
         typeof target[0] === "number"
           ? target[0]
           : await doc.getPageIndex(target[0]);
-      setPage(index + 1);
+      goTo(index + 1);
       setShowOutline(false);
     } catch {
       onError("这个目录条目无法定位。");
@@ -141,7 +166,7 @@ export default function PdfReader({
         <button
           aria-label="上一页"
           disabled={page <= 1}
-          onClick={() => setPage(page - 1)}
+          onClick={() => goTo(page - 1)}
         >
           <ChevronLeft size={17} />
         </button>
@@ -153,14 +178,14 @@ export default function PdfReader({
           value={page}
           onChange={(e) => {
             const n = Number(e.target.value);
-            if (n >= 1 && n <= paper.page_count) setPage(n);
+            if (n >= 1 && n <= paper.page_count) goTo(n);
           }}
         />
         <span>/ {paper.page_count}</span>
         <button
           aria-label="下一页"
           disabled={page >= paper.page_count}
-          onClick={() => setPage(page + 1)}
+          onClick={() => goTo(page + 1)}
         >
           <ChevronRight size={17} />
         </button>
@@ -206,16 +231,45 @@ export default function PdfReader({
         className="pdf-scroll"
         ref={scroll}
         tabIndex={0}
-        aria-label="PDF 页面。可滚动、横向滑动或使用方向键翻页"
-        onWheel={onWheel}
+        aria-label="连续 PDF 页面。上下滚动阅读，横向滑动或左右方向键跳一页"
+        onWheel={onHorizontalWheel}
+        onScroll={() => {
+          if (scrollFrame.current !== null) return;
+          scrollFrame.current = requestAnimationFrame(() => {
+            scrollFrame.current = null;
+            const root = scroll.current;
+            if (!root) return;
+            const rootBox = root.getBoundingClientRect();
+            const targetY = rootBox.top + Math.min(rootBox.height * 0.35, 260);
+            let visiblePage = page;
+            let distance = Infinity;
+            for (const [number, element] of pageElements.current) {
+              const box = element.getBoundingClientRect();
+              const d =
+                targetY < box.top
+                  ? box.top - targetY
+                  : targetY > box.bottom
+                    ? targetY - box.bottom
+                    : 0;
+              if (d < distance) {
+                distance = d;
+                visiblePage = number;
+              }
+            }
+            if (visiblePage !== page) {
+              internalPage.current = visiblePage;
+              setPage(visiblePage, false);
+            }
+          });
+        }}
         onKeyDown={(e) => {
-          if (["ArrowRight", "PageDown"].includes(e.key)) {
+          if (e.key === "ArrowRight") {
             e.preventDefault();
-            turn(1);
+            goTo(page + 1);
           }
-          if (["ArrowLeft", "PageUp"].includes(e.key)) {
+          if (e.key === "ArrowLeft") {
             e.preventDefault();
-            turn(-1);
+            goTo(page - 1);
           }
         }}
         onTouchStart={(e) => {
@@ -227,37 +281,77 @@ export default function PdfReader({
           const t = e.changedTouches[0],
             dx = touchStart.current.x - t.clientX,
             dy = touchStart.current.y - t.clientY;
-          const atStart = e.currentTarget.scrollTop <= 1;
-          const atEnd =
-            e.currentTarget.scrollTop + e.currentTarget.clientHeight >=
-            e.currentTarget.scrollHeight - 1;
-          if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy))
-            turn(dx > 0 ? 1 : -1);
-          else if (
-            Math.abs(dy) > 65 &&
-            ((dy < 0 && atStart) || (dy > 0 && atEnd))
+          if (
+            Math.abs(dx) > 70 &&
+            Math.abs(dx) > Math.abs(dy) * 1.25 &&
+            e.currentTarget.scrollWidth <= e.currentTarget.clientWidth + 2
           )
-            turn(dy > 0 ? 1 : -1);
+            goTo(page + (dx > 0 ? 1 : -1));
           touchStart.current = null;
         }}
       >
-        {doc ? (
-          <PdfPage
-            key={`${paper.id}-${page}-${width}-${zoom}`}
-            doc={doc}
-            paper={paper}
-            page={page}
-            width={width * zoom}
-            region={region}
-            anchor={anchor}
-            onSelect={onSelect}
-            onError={onError}
-          />
+        {doc && ratios.length ? (
+          <div className="pdf-pages">
+            {ratios.map((ratio, index) => {
+              const number = index + 1;
+              return (
+                <LazyPdfPage
+                  key={`${paper.id}-${number}`}
+                  root={scroll}
+                  registry={pageElements}
+                  doc={doc}
+                  paper={paper}
+                  page={number}
+                  width={width * zoom}
+                  ratio={ratio}
+                  region={region}
+                  anchor={anchor}
+                  onSelect={onSelect}
+                  onError={onError}
+                />
+              );
+            })}
+          </div>
         ) : (
           <p className="muted">正在打开 PDF…</p>
         )}
       </div>
     </>
+  );
+}
+
+function LazyPdfPage({
+  root,
+  registry,
+  ratio,
+  ...props
+}: Parameters<typeof PdfPage>[0] & {
+  root: RefObject<HTMLDivElement | null>;
+  registry: MutableRefObject<Map<number, HTMLDivElement>>;
+  ratio: number;
+}) {
+  const holder = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (holder.current) registry.current.set(props.page, holder.current);
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { root: root.current, rootMargin: "1000px 0px" },
+    );
+    if (holder.current) observer.observe(holder.current);
+    return () => {
+      observer.disconnect();
+      registry.current.delete(props.page);
+    };
+  }, [props.page, registry, root]);
+  return (
+    <div
+      ref={holder}
+      className="pdf-page-shell"
+      style={{ height: props.width * ratio }}
+    >
+      {visible && <PdfPage {...props} />}
+    </div>
   );
 }
 function PdfPage({
