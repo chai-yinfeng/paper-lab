@@ -78,6 +78,8 @@ class ContextTests(unittest.TestCase):
         self.assertTrue(packet["coverage"]["complete_text"])
         self.assertIn("未做字符截断", packet["scope"])
         self.assertIn("[p.3]", messages[-1]["content"])
+        self.assertNotIn("覆盖范围：", messages[-1]["content"])
+        self.assertIn("直接进入论文内容", messages[0]["content"])
         self.assertIn("外部背景（未检索）", messages[0]["content"])
 
     def test_anchor_rejects_wrong_source_and_nonfinite_coordinates(self):
