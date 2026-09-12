@@ -776,6 +776,21 @@ a {
   position: relative;
   overscroll-behavior: contain;
 }
+.region-mode-hint {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto 10px;
+  padding: 6px 10px;
+  border: 1px solid #b9caaa;
+  border-radius: 6px;
+  background: #f5f9edee;
+  color: #52694d;
+  font-size: 12px;
+  pointer-events: none;
+}
 .pdf-page {
   position: relative;
   background: white;

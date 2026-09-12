@@ -817,6 +817,7 @@ export default function App() {
             paper={paper}
             page={page}
             setPage={changePage}
+            supportsImages={config.supports_images}
             anchor={anchor}
             onSelect={(a) => {
               setAnchor(a);
@@ -982,7 +983,7 @@ export default function App() {
                           onClick={() => cite(m.anchor!.page, m.anchor)}
                         >
                           p.{m.anchor.page}
-                          {m.anchor.kind === "region" ? " · 图表" : ""}
+                          {m.anchor.kind === "region" ? " · 截图" : ""}
                         </button>
                       )}
                     </div>
@@ -1029,7 +1030,7 @@ export default function App() {
                   <span className="eyebrow">SPECIALIST</span>
                   <h2>带着问题阅读</h2>
                   <p>
-                    选中一段文字或框选图表，
+                    选中一段文字或截图框选图表，
                     <br />
                     从这里继续理解。
                   </p>
@@ -1065,7 +1066,7 @@ export default function App() {
                     onClick={() => cite(anchor.page, anchor)}
                   >
                     p.{anchor.page} ·{" "}
-                    {anchor.kind === "region" ? "图表选区" : "文字选区"}
+                    {anchor.kind === "region" ? "截图选区" : "文字选区"}
                   </button>
                   <span>将作为问题的直接原文依据</span>
                 </div>
@@ -1075,7 +1076,7 @@ export default function App() {
                   </summary>
                   <p>
                     {anchor.quote ||
-                      "将发送区域图像；补充文字仍按当前页、相邻页与问题关键词选择。"}
+                      "将发送区域截图；框内可提取文字只作辅助，补充原文仍按当前页、相邻页与问题关键词选择。"}
                   </p>
                 </details>
                 <button

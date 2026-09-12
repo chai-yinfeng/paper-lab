@@ -4,7 +4,6 @@ import {
   useState,
   type MutableRefObject,
   type RefObject,
-  type WheelEvent,
 } from "react";
 import {
   getDocument,
@@ -30,6 +29,7 @@ export default function PdfReader({
   paper,
   page,
   setPage,
+  supportsImages,
   anchor,
   onSelect,
   onError,
@@ -37,6 +37,7 @@ export default function PdfReader({
   paper: Paper;
   page: number;
   setPage: (p: number, clearAnchor?: boolean) => void;
+  supportsImages: boolean;
   anchor: Anchor | null;
   onSelect: (a: Anchor) => void;
   onError: (e: string) => void;
@@ -52,8 +53,9 @@ export default function PdfReader({
   const pageElements = useRef(new Map<number, HTMLDivElement>());
   const internalPage = useRef<number | null>(null);
   const scrollFrame = useRef<number | null>(null);
-  const wheel = useRef({ amount: 0, last: 0, handled: false });
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!supportsImages) setRegion(false);
+  }, [supportsImages]);
   useEffect(() => {
     let active = true;
     const task = getDocument({
@@ -119,23 +121,6 @@ export default function PdfReader({
     pageElements.current
       .get(target)
       ?.scrollIntoView({ block: "start", behavior });
-  }
-  function onHorizontalWheel(e: WheelEvent<HTMLDivElement>) {
-    const element = e.currentTarget;
-    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-    if (element.scrollWidth > element.clientWidth + 2) return;
-    const now = Date.now();
-    if (now - wheel.current.last > 180) {
-      wheel.current.amount = 0;
-      wheel.current.handled = false;
-    }
-    wheel.current.last = now;
-    wheel.current.amount += e.deltaX;
-    if (Math.abs(wheel.current.amount) > 90 && !wheel.current.handled) {
-      e.preventDefault();
-      wheel.current.handled = true;
-      goTo(page + (wheel.current.amount > 0 ? 1 : -1));
-    }
   }
   async function jump(dest: unknown) {
     if (!doc) return;
@@ -207,11 +192,21 @@ export default function PdfReader({
         </button>
         <button
           className={region ? "active" : ""}
-          onClick={() => setRegion(!region)}
-          title={region ? "切换文字选择" : "框选图表"}
+          disabled={!supportsImages}
+          onClick={() => {
+            window.getSelection()?.removeAllRanges();
+            setRegion(!region);
+          }}
+          title={
+            !supportsImages
+              ? "当前模型未启用图像输入"
+              : region
+                ? "当前为截图框选；在页面上拖动，或点击这里切回文字选择"
+                : "切换到截图框选"
+          }
         >
           {region ? <Scan size={17} /> : <TextSelect size={17} />}
-          <span>{region ? "框选" : "文字"}</span>
+          <span>{region ? "截图框选" : "文字"}</span>
         </button>
       </div>
       {showOutline && (
@@ -231,8 +226,15 @@ export default function PdfReader({
         className="pdf-scroll"
         ref={scroll}
         tabIndex={0}
-        aria-label="连续 PDF 页面。上下滚动阅读，横向滑动或左右方向键跳一页"
-        onWheel={onHorizontalWheel}
+        aria-label="连续 PDF 页面。上下滚动阅读，使用工具栏按钮翻页"
+        onPointerDown={(e) => {
+          if (
+            !region &&
+            e.target instanceof Element &&
+            !e.target.closest(".textLayer span")
+          )
+            window.getSelection()?.removeAllRanges();
+        }}
         onScroll={() => {
           if (scrollFrame.current !== null) return;
           scrollFrame.current = requestAnimationFrame(() => {
@@ -262,34 +264,12 @@ export default function PdfReader({
             }
           });
         }}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowRight") {
-            e.preventDefault();
-            goTo(page + 1);
-          }
-          if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            goTo(page - 1);
-          }
-        }}
-        onTouchStart={(e) => {
-          const t = e.touches[0];
-          touchStart.current = { x: t.clientX, y: t.clientY };
-        }}
-        onTouchEnd={(e) => {
-          if (!touchStart.current || !e.changedTouches[0]) return;
-          const t = e.changedTouches[0],
-            dx = touchStart.current.x - t.clientX,
-            dy = touchStart.current.y - t.clientY;
-          if (
-            Math.abs(dx) > 70 &&
-            Math.abs(dx) > Math.abs(dy) * 1.25 &&
-            e.currentTarget.scrollWidth <= e.currentTarget.clientWidth + 2
-          )
-            goTo(page + (dx > 0 ? 1 : -1));
-          touchStart.current = null;
-        }}
       >
+        {region && (
+          <div className="region-mode-hint">
+            在页面上拖动框选图表；发送时会附带该区域截图，框内文字仅作辅助。
+          </div>
+        )}
         {doc && ratios.length ? (
           <div className="pdf-pages">
             {ratios.map((ratio, index) => {
@@ -388,34 +368,40 @@ function PdfPage({
     let layer: TextLayer | undefined;
     (async () => {
       const p = await doc.getPage(page);
-      if (stopped || !canvas.current || !text.current) return;
+      const canvasElement = canvas.current;
+      const textElement = text.current;
+      if (stopped || !canvasElement || !textElement) return;
+      setReady(false);
+      textElement.replaceChildren();
       const base = p.getViewport({ scale: 1 }),
         viewport = p.getViewport({ scale: width / base.width });
       setHeight(viewport.height);
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.current.width = Math.floor(viewport.width * ratio);
-      canvas.current.height = Math.floor(viewport.height * ratio);
-      canvas.current.style.width = viewport.width + "px";
-      canvas.current.style.height = viewport.height + "px";
+      canvasElement.width = Math.floor(viewport.width * ratio);
+      canvasElement.height = Math.floor(viewport.height * ratio);
+      canvasElement.style.width = viewport.width + "px";
+      canvasElement.style.height = viewport.height + "px";
       render = p.render({
-        canvas: canvas.current,
+        canvas: canvasElement,
         viewport,
         transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
       });
       await render.promise;
-      if (stopped) return;
-      text.current!.style.setProperty("--scale-factor", String(viewport.scale));
-      text.current!.style.setProperty(
+      if (stopped || !textElement.isConnected) return;
+      textElement.style.setProperty("--scale-factor", String(viewport.scale));
+      textElement.style.setProperty(
         "--total-scale-factor",
         String(viewport.scale),
       );
+      const textContent = await p.getTextContent();
+      if (stopped || !textElement.isConnected) return;
       layer = new TextLayer({
-        textContentSource: await p.getTextContent(),
-        container: text.current!,
+        textContentSource: textContent,
+        container: textElement,
         viewport,
       });
       await layer.render();
-      if (!stopped) setReady(true);
+      if (!stopped && textElement.isConnected) setReady(true);
     })().catch((e) => {
       if (!stopped) onError("页面渲染失败：" + e.message);
     });
@@ -447,7 +433,15 @@ function PdfPage({
     if (!quote) return;
     const box = holder.current!.getBoundingClientRect();
     const rects = Array.from(selection.getRangeAt(0).getClientRects())
-      .filter((r) => r.width > 1 && r.height > 1)
+      .filter(
+        (r) =>
+          r.width > 1 &&
+          r.height > 1 &&
+          r.right > box.left &&
+          r.left < box.right &&
+          r.bottom > box.top &&
+          r.top < box.bottom,
+      )
       .slice(0, 200)
       .map(
         (r) =>
@@ -459,7 +453,7 @@ function PdfPage({
           ] as Rect,
       )
       .filter((r) => r[0] < r[2] && r[1] < r[3]);
-    if (rects.length)
+    if (rects.length) {
       onSelect({
         sha256: paper.sha256,
         page,
@@ -467,6 +461,8 @@ function PdfPage({
         rects,
         quote: quote.slice(0, 8000),
       });
+      selection.removeAllRanges();
+    }
   }
   function finish() {
     if (!start.current || !drag) return;
@@ -476,7 +472,9 @@ function PdfPage({
       return;
     }
     const box = holder.current!.getBoundingClientRect();
-    const quote = Array.from(text.current?.querySelectorAll("span") || [])
+    const quote = Array.from(
+      text.current?.querySelectorAll(":scope > span") || [],
+    )
       .filter((el) => {
         const r = el.getBoundingClientRect();
         const x = (r.left + r.width / 2 - box.left) / box.width,
