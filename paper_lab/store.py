@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS pages (
  PRIMARY KEY(paper_id,number));
 CREATE TABLE IF NOT EXISTS threads (
  id TEXT PRIMARY KEY, paper_id TEXT NOT NULL REFERENCES papers(id), title TEXT NOT NULL,
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+ context_mode TEXT NOT NULL DEFAULT 'focused', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS threads_paper ON threads(paper_id, updated_at);
 CREATE TABLE IF NOT EXISTS messages (
  id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id), role TEXT NOT NULL,
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS runs_thread ON runs(thread_id, created_at);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Store:
@@ -68,6 +68,13 @@ class Store:
         self.conn.executescript(SCHEMA)
         if version == 1:
             self.conn.execute("ALTER TABLE runs ADD COLUMN trace TEXT")
+        thread_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(threads)").fetchall()
+        }
+        if "context_mode" not in thread_columns:
+            self.conn.execute(
+                "ALTER TABLE threads ADD COLUMN context_mode TEXT NOT NULL DEFAULT 'focused'"
+            )
         self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         # A process crash must never leave a conversation apparently generating forever.
         with self.conn:

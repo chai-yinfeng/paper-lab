@@ -19,7 +19,13 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.concurrency import run_in_threadpool
 
-from .context import add_external_sources, build_context, build_summary_context, locate_excerpt
+from .context import (
+    add_external_sources,
+    build_context,
+    build_full_context,
+    build_summary_context,
+    locate_excerpt,
+)
 from .documents import MAX_PDF, crop, import_pdf, validate_anchor
 from .keychain import get_key as keychain_get
 from .keychain import set_key as keychain_set
@@ -309,17 +315,19 @@ def create_app():
         identifier = uid()
         now = stamp()
         ws().store.execute(
-            "INSERT INTO threads VALUES (?,?,?,?,?)",
-            (identifier, paper_id, body.title.strip() or "新主题", now, now),
+            "INSERT INTO threads(id,paper_id,title,context_mode,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+            (identifier, paper_id, body.title.strip() or "新主题", "focused", now, now),
         )
         return thread(identifier)
 
     @app.patch("/api/threads/{thread_id}")
-    def rename(thread_id: str, body: Title):
-        thread(thread_id)
+    def update_thread(thread_id: str, body: ThreadUpdate):
+        current = thread(thread_id)
+        title = current["title"] if body.title is None else body.title.strip() or "新主题"
+        mode = body.context_mode or current["context_mode"]
         ws().store.execute(
-            "UPDATE threads SET title=?,updated_at=? WHERE id=?",
-            (body.title.strip() or "新主题", stamp(), thread_id),
+            "UPDATE threads SET title=?,context_mode=?,updated_at=? WHERE id=?",
+            (title, mode, stamp(), thread_id),
         )
         return thread(thread_id)
 
@@ -374,11 +382,15 @@ def create_app():
     @app.post("/api/threads/{thread_id}/context")
     async def context(thread_id: str, body: Question):
         t = thread(thread_id)
-        builder = build_summary_context if body.purpose != "question" else build_context
         if body.purpose == "question":
-            packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.question, body.anchor)
+            builder = build_full_context if t["context_mode"] == "full" else build_context
+            packet, _ = builder(
+                ws().store, paper(t["paper_id"]), thread_id, body.question, body.anchor
+            )
         else:
-            packet, _ = builder(ws().store, paper(t["paper_id"]), thread_id, body.purpose)
+            packet, _ = build_summary_context(
+                ws().store, paper(t["paper_id"]), thread_id, body.purpose
+            )
         if body.academic_search:
             external = normalize_sources(body.external_sources) or await search_academic(
                 paper(t["paper_id"])["title"] + " " + body.question
@@ -419,7 +431,8 @@ def create_app():
         app.state.active.add(thread_id)
         try:
             if body.purpose == "question":
-                packet, chat = build_context(db, p, thread_id, body.question, anchor)
+                builder = build_full_context if t["context_mode"] == "full" else build_context
+                packet, chat = builder(db, p, thread_id, body.question, anchor)
                 if body.academic_search:
                     external = normalize_sources(body.external_sources) or await search_academic(
                         p["title"] + " " + body.question
@@ -792,6 +805,11 @@ class Arxiv(BaseModel):
 
 class Title(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+
+
+class ThreadUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    context_mode: Literal["focused", "full"] | None = None
 
 
 class Tags(BaseModel):

@@ -1226,7 +1226,7 @@ hr {
 .topic-bar .danger-icon {
   color: #985746;
 }
-.summary-actions {
+.context-mode-bar {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1234,7 +1234,7 @@ hr {
   border-bottom: 1px solid #f0f2eb;
   background: #fbfcf9;
 }
-.summary-actions > span {
+.context-mode-bar > span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1242,9 +1242,14 @@ hr {
   font-size: 12px;
   margin-right: auto;
 }
-.summary-actions button {
+.context-mode-bar button {
   padding: 5px 8px;
   font-size: 12px;
+}
+.context-mode-bar button.active {
+  border-color: #708e66;
+  background: #e8efe3;
+  color: #35533a;
 }
 .composer textarea {
   min-height: 0;

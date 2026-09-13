@@ -13,7 +13,7 @@ from unittest.mock import patch
 import httpx
 
 from paper_lab.api import create_app
-from paper_lab.context import build_context, build_summary_context
+from paper_lab.context import build_context, build_full_context, build_summary_context
 from paper_lab.documents import validate_anchor, import_pdf
 from paper_lab.keychain import SERVICE
 from paper_lab.keychain import get_key as keychain_get
@@ -46,8 +46,8 @@ def seed(db):
             ),
         )
     db.execute(
-        "INSERT INTO threads VALUES (?,?,?,?,?)",
-        ("topic", "paper", "Synthetic topic", stamp(), stamp()),
+        "INSERT INTO threads(id,paper_id,title,context_mode,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+        ("topic", "paper", "Synthetic topic", "focused", stamp(), stamp()),
     )
 
 
@@ -126,6 +126,29 @@ class ContextTests(unittest.TestCase):
         self.assertIn("直接进入论文内容", messages[0]["content"])
         self.assertIn("外部背景（未检索）", messages[0]["content"])
 
+    def test_full_context_keeps_paper_as_stable_prefix_before_history(self):
+        first_packet, first = build_full_context(
+            self.db, self.paper, "topic", "first question", None
+        )
+        self.db.execute(
+            "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
+            ("u", "topic", "user", "first question", None, None, "complete", None, stamp()),
+        )
+        self.db.execute(
+            "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
+            ("a", "topic", "assistant", "first answer", None, None, "complete", None, stamp()),
+        )
+        second_packet, second = build_full_context(
+            self.db, self.paper, "topic", "second question", None
+        )
+        self.assertEqual(first[:2], second[:2])
+        self.assertEqual(second[2:4], [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+        ])
+        self.assertEqual(first_packet["context_mode"], "full")
+        self.assertEqual(second_packet["coverage"]["pages_included"], [1, 2, 3])
+
     def test_anchor_rejects_wrong_source_and_nonfinite_coordinates(self):
         a = {
             "sha256": SHA,
@@ -179,7 +202,11 @@ class ContextTests(unittest.TestCase):
                 columns = [row[1] for row in migrated.conn.execute("PRAGMA table_info(runs)")]
                 self.assertIn("trace", columns)
                 self.assertEqual(
-                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 3
+                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 4
+                )
+                self.assertIn(
+                    "context_mode",
+                    {row[1] for row in migrated.conn.execute("PRAGMA table_info(threads)")},
                 )
             finally:
                 migrated.close()
@@ -277,6 +304,15 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len((await self.client.get("/api/papers/paper/threads")).json()), 2
         )
+
+    async def test_thread_context_mode_is_persistent(self):
+        response = await self.client.patch(
+            "/api/threads/topic", json={"context_mode": "full"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["context_mode"], "full")
+        threads = (await self.client.get("/api/papers/paper/threads")).json()
+        self.assertEqual(threads[0]["context_mode"], "full")
 
     async def test_paper_identity_and_user_tags_are_separate_from_pdf_storage(self):
         paper = (await self.client.get("/api/papers")).json()[0]

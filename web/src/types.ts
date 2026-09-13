@@ -30,7 +30,11 @@ export type ExternalSource = {
   retrieved_at: string;
   content_hash: string;
 };
-export type Thread = { id: string; title: string };
+export type Thread = {
+  id: string;
+  title: string;
+  context_mode: "focused" | "full";
+};
 export type Context = {
   sources: {
     page: number;
@@ -44,6 +48,7 @@ export type Context = {
   characters: number;
   history_messages: number;
   scope: string;
+  context_mode?: "focused" | "full";
   image_attached: boolean;
   anchor: Anchor | null;
   external_sources?: ExternalSource[];

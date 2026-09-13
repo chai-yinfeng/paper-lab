@@ -8,9 +8,12 @@
 - 自定义本地工作目录；上传与 arXiv 搜索下载统一导入 `pdfs/`，按 SHA256 去重。
 - PDF.js 连续预览、目录、工具栏翻页、缩放、文字选择和区域截图；新回答按物理页码与页内片段引用并回跳，高亮可定位的原文片段。
 - 每篇论文多个主题对话，流式回答、停止生成、恢复阅读位置和最近主题。
+- 每个主题可在 `Focused` 与 `Full paper` context mode 间切换；后者把确定性排序的全文放在
+  对话历史之前，以便围绕全篇连续讨论并复用 provider prefix cache。
 - 默认 Specialist；Draft + Editor 显式选择，Reader draft 经 Editor 对照原文修订后才作为最终回答，审查记录默认折叠。
 - 原文上下文预览；按当前页、相邻页和词项相关性补充同篇片段，不自动外部搜索。
-- 每次提问可显式开启 Semantic Scholar 学术资料检索；外部 evidence 以 `[E1]` 引用，保存 exact excerpt、section、来源链接和检索 provider。
+- 每次提问可显式开启学术资料检索；优先使用 Semantic Scholar snippet，受限时回退到
+  OpenAlex abstract。外部 evidence 以 `[E1]` 引用并保存 exact excerpt、locator、链接和 provider。
 - 论文实体按 PDF SHA256 去重；列表显示不可编辑标题、派生 citation key，并允许用户添加多个自定义标签。
 - 对话自动保存，笔记手动确认、编辑、导出 Markdown。
 - DeepSeek 与 OpenAI-compatible provider 接口；默认 `deepseek-flash`（V4.1 Flash）。
@@ -62,8 +65,7 @@ API key 可以在界面中输入并持久保存在 macOS Keychain，或通过 `D
 不会与其他应用保存的 DeepSeek key 混淆。它不会写入工作目录、浏览器存储或 Git，也不会从状态接口返回。
 未配置 key 时可以阅读 PDF 和管理已有笔记。
 
-DeepSeek 默认关闭 thinking，常规问答输出上限为 4096 tokens，可以在设置中修改；
-全篇概览和总结使用 provider 公布的 maximum output，不沿用常规问答上限。
+DeepSeek 默认关闭 thinking，回答输出上限为 4096 tokens，可以在设置中修改。
 官方 API ID 为 `deepseek-flash`，不是 `deepseek-v4.1-flash` 或旧版兼容别名。
 模型与 provider 可以切换；更换 API 地址时会清空会话 key，避免将旧 key 发往新地址。
 兼容 provider 当前使用 Chat Completions 协议，图像能力由设置明确声明；不保证兼容所有厂商扩展。

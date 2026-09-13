@@ -17,7 +17,6 @@ import {
   PanelLeftClose,
   Pencil,
   Trash2,
-  Sparkles,
   Info,
   Tags,
 } from "lucide-react";
@@ -487,6 +486,24 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function updateContextMode(mode: "focused" | "full") {
+    if (!thread || generating) return;
+    setBusy(true);
+    try {
+      const updated = await api<Thread>(`/threads/${thread.id}`, "PATCH", {
+        context_mode: mode,
+      });
+      setThread(updated);
+      setThreads((old) =>
+        old.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setContext(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function previewContext() {
     setBusy(true);
     try {
@@ -516,13 +533,8 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function send(options?: {
-    text?: string;
-    purpose?: "question" | "pre-read" | "post-read";
-    topicTitle?: string;
-  }) {
-    const text = (options?.text ?? question).trim();
-    const purpose = options?.purpose || "question";
+  async function send() {
+    const text = question.trim();
     if (!text || generating || !paper) return;
     setGenerating(true);
     setError("");
@@ -532,26 +544,26 @@ export default function App() {
     let t: Thread | null = null;
     let sent = false;
     try {
-      t = await ensureThread(options?.topicTitle);
-      const a = purpose === "question" ? currentAnchor() : null;
+      t = await ensureThread();
+      const a = currentAnchor();
       const previewKey = `${paper.id}:${text}:${academicSearch}`;
       const response = await request(`/threads/${t.id}/messages`, {
         method: "POST",
         body: JSON.stringify({
           question: text,
           anchor: a,
-          workflow: purpose === "question" ? workflow : "specialist",
-          purpose,
-          academic_search: purpose === "question" && academicSearch,
+          workflow,
+          purpose: "question",
+          academic_search: academicSearch,
           external_sources:
-            purpose === "question" && preparedExternal?.key === previewKey
+            preparedExternal?.key === previewKey
               ? preparedExternal.sources
               : [],
         }),
         signal: controller.signal,
       });
       sent = true;
-      if (purpose === "question") setQuestion("");
+      setQuestion("");
       let answerId = "pending";
       setMessages((old) => [
         ...old,
@@ -1027,34 +1039,22 @@ export default function App() {
                 </button>
               </div>
             )}
-            {paper && (
-              <div className="summary-actions">
-                <span>
-                  <Sparkles size={14} /> 全篇辅助
-                </span>
+            {paper && thread && (
+              <div className="context-mode-bar">
+                <span>Context</span>
                 <button
-                  disabled={generating || busy || !status?.key_configured}
-                  onClick={() =>
-                    void send({
-                      text: "生成阅读前概览",
-                      purpose: "pre-read",
-                      topicTitle: "阅读前概览",
-                    })
-                  }
+                  className={thread.context_mode === "focused" ? "active" : ""}
+                  disabled={generating || busy}
+                  onClick={() => void updateContextMode("focused")}
                 >
-                  阅读前概览
+                  Focused
                 </button>
                 <button
-                  disabled={generating || busy || !status?.key_configured}
-                  onClick={() =>
-                    void send({
-                      text: "生成阅读后总结",
-                      purpose: "post-read",
-                      topicTitle: "阅读后总结",
-                    })
-                  }
+                  className={thread.context_mode === "full" ? "active" : ""}
+                  disabled={generating || busy}
+                  onClick={() => void updateContextMode("full")}
                 >
-                  阅读后总结
+                  Full paper
                 </button>
               </div>
             )}
@@ -1182,6 +1182,13 @@ export default function App() {
                     {u.tokens
                       ? `输入 ${u.tokens.prompt_tokens ?? "—"} / 输出 ${u.tokens.completion_tokens ?? "—"} tokens`
                       : "usage 未返回，费用未知"}
+                    {u.tokens?.prompt_cache_hit_tokens != null && (
+                      <>
+                        <br />
+                        Cache hit {u.tokens.prompt_cache_hit_tokens} / miss{" "}
+                        {u.tokens.prompt_cache_miss_tokens ?? "—"} tokens
+                      </>
+                    )}
                   </div>
                 ))}
                 {runs[0].error && <p>{runs[0].error}</p>}
@@ -1489,7 +1496,7 @@ export default function App() {
             </select>
           </label>
           <label>
-            常规问答输出上限
+            回答输出上限
             <input
               type="number"
               min={256}
@@ -1692,10 +1699,9 @@ export default function App() {
               </section>
             ) : null}
             <p className="small muted">
-              普通提问先找选区句群，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
-              24 个原文片段、24,000
-              字符。全篇概览/总结发送全部可提取文字；DeepSeek 总结使用 provider 的最大输出范围，
-              最终仍受所选模型的 context window 与 maximum output 限制。
+              Focused 按选区、当前页、相邻页和问题关键词选择最多 24 个片段、24,000
+              字符。Full paper 每轮把全部可提取正文放在对话历史之前，形成稳定 prompt prefix；
+              最终仍受 provider 的 context window 限制。
             </p>
             <p className="small">
               {context.coverage &&
@@ -1887,11 +1893,12 @@ function Markdown({
 }) {
   const allowed = allowedPages || new Set(sources.map((source) => source.page));
   const linked = content
-    .replace(/\[p\.(\d+)\s+¶(\d+)\]/g, (match) => {
+    .replace(/\[(?:p\.|citation:)\s*(\d+)\s+¶\s*(\d+)\]/gi, (match, page, group) => {
+      const canonical = `[p.${page} ¶${group}]`;
       const index = sources.findIndex(
-        (source) => `[${source.citation}]` === match,
+        (source) => `[${source.citation}]` === canonical,
       );
-      return index >= 0 ? `${match}(#pdf-source-${index})` : match;
+      return index >= 0 ? `${canonical}(#pdf-source-${index})` : match;
     })
     .replace(/\[p\.(\d+)\]/g, (match, n) =>
       allowed.has(Number(n)) ? `[p.${n}](#pdf-page-${n})` : match,

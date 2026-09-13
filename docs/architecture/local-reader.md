@@ -43,33 +43,33 @@ stop the application before copying it. No automatic migration of previous counc
 2. PDF.js renders one page and a selectable text layer. Fonts, CMaps and WASM are served locally.
 3. Text selection records quote and per-line normalized rectangles. Rectangle selection records a region and
    nearby extracted text. Anchors use displayed CropBox coordinates and physical page numbers starting at one.
-4. A question ranks compact sentence-group excerpts by exact selection, current/neighboring pages, lexical matches and
+4. `Focused` ranks compact sentence-group excerpts by exact selection, current/neighboring pages, lexical matches and
    the first-page overview. It sends at most 24 excerpts, 24,000 source characters and 10,000 history characters.
-   The preview states why every excerpt was selected and shows the exact text before a paid call.
+   `Full paper` places all extractable source groups in a deterministic message before up to 80 history messages /
+   120,000 history characters. The stable paper prefix is designed for provider prefix caching. The preview shows the
+   exact source text before a paid call.
 5. Region questions attach a bounded PNG rendered by Poppler; text questions send text. No OCR is silently
    substituted. Image-only pages require a vision-enabled provider and a region selection.
 6. Answers use `[p.N ¶K]`; only supplied source groups become clickable citations. These are locators, not proof
    that a generated claim is true. Saved and generated anchors scroll to the group position within the page and
    restore its word-level highlight.
 7. The user confirms/edits an answer to create a note. Reading position and selected topic can be resumed.
-8. Reading-before and reading-after summaries each use one Specialist call and send all extracted text without an
-   application input or output cap on DeepSeek; the request uses the provider's documented maximum output allowance.
-   The selected provider's context window and maximum output remain the hard limits. Paper claims require
-   page citations. Unsearched model knowledge is explicitly labeled external background.
+8. Overview, summary and other global tasks use `Full paper` with a user-written prompt. They are ordinary topic
+   messages rather than fixed product actions, so the user can continue the same conversation or change its goal.
+   The selected provider's context window and maximum output remain the hard limits.
 9. The reader uses continuous vertical scrolling. Toolbar buttons and page-number input provide explicit page jumps;
    horizontal trackpad gestures do not turn pages.
 
 The context builder is deterministic; it is not semantic retrieval and cannot guarantee finding every relevant
-definition, especially for Chinese questions about English text. Full-paper summaries send every extracted page;
-scanned pages without text still require OCR or a future multimodal whole-document path.
+definition, especially for Chinese questions about English text. `Full paper` sends every extracted page; scanned
+pages without text still require OCR or a future multimodal whole-document path.
 
 ## Model boundary and workflow
 
 Default API ID: `deepseek-flash` (DeepSeek V4.1 Flash). Verified against DeepSeek's official release and API docs
 on 2026-09-11. No deprecated aliases are stored. DeepSeek thinking is explicitly disabled by default to avoid
-provider defaults expanding cost unexpectedly; users can enable low/high thinking. Regular questions are capped at
-4096 output tokens by default and are configurable from 256 to 16384. Full-paper summaries use DeepSeek's documented
-maximum output allowance instead of the regular-question cap.
+provider defaults expanding cost unexpectedly; users can enable low/high thinking. Answers are capped at 4096 output
+tokens by default and are configurable from 256 to 16384.
 
 - Specialist: one streaming Chat Completions call.
 - Draft + Editor: at most two calls. Reader creates a private draft; Editor checks it against the same supplied
