@@ -21,6 +21,9 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
 - `runs`: workflow, provider, requested model, structured stage trace, actual returned model per step,
   usage and completion/error status. Draft + Editor keeps the Reader draft and Editor review in the trace;
   the linked assistant message contains only the edited final answer.
+- `memory_compactions`: per-topic review drafts and the single active long-term memory, with an immutable message
+  rowid cutoff, source count, provider/model and usage. Activating a draft supersedes the prior active summary but
+  never deletes messages; disabling it restores raw-history assembly.
 - `settings`: provider configuration and resume pointers, never API secrets.
 
 Academic search is explicitly enabled per question and is independent of the LLM provider. Semantic Scholar
@@ -56,6 +59,8 @@ stop the application before copying it. No automatic migration of previous counc
    that a generated claim is true. Saved and generated anchors scroll to the group position within the page and
    restore its word-level highlight.
 7. The user confirms/edits an answer to create a note. Reading position and selected topic can be resumed.
+   Up to 20 confirmed notes / 20,000 characters from the current paper enter context as user memory, while their
+   `NOTE` labels are explicitly excluded from evidence citation semantics.
 8. Overview, summary and other global tasks use `Full paper` with a user-written prompt. They are ordinary topic
    messages rather than fixed product actions, so the user can continue the same conversation or change its goal.
    The selected provider's context window and maximum output remain the hard limits.
@@ -65,6 +70,15 @@ stop the application before copying it. No automatic migration of previous counc
 The context builder is deterministic; it is not semantic retrieval and cannot guarantee finding every relevant
 definition, especially for Chinese questions about English text. `Full paper` sends every extracted page; scanned
 pages without text still require OCR or a future multimodal whole-document path.
+
+## Conversation memory
+
+The complete message log is the durable source of truth. Focused and Full paper assemble bounded recent history on
+each stateless provider request and expose provider cache hit/miss tokens when returned. A user-triggered compaction
+call summarizes the previous confirmed summary plus the next contiguous batch of complete messages. The result is a
+draft until the user edits and activates it. An active summary enters both context modes, and only messages after its
+stored cutoff are sent verbatim. Compaction never runs automatically, never retries, and never deletes the covered
+messages. This avoids silent memory drift while allowing incremental compression of long topics.
 
 ## Model boundary and workflow
 

@@ -37,6 +37,7 @@ import type {
   Run,
   Candidate,
   ExternalSource,
+  MemoryState,
 } from "./types";
 import "./style.css";
 
@@ -53,6 +54,7 @@ export default function App() {
     [notes, setNotes] = useState<Note[]>([]),
     [showCrossPaperNotes, setShowCrossPaperNotes] = useState(false),
     [runs, setRuns] = useState<Run[]>([]),
+    [memory, setMemory] = useState<MemoryState | null>(null),
     [tab, setTab] = useState<"chat" | "notes">("chat"),
     [question, setQuestion] = useState(""),
     [workflow, setWorkflow] = useState("specialist"),
@@ -95,6 +97,7 @@ export default function App() {
     topicDialog = useRef<HTMLDialogElement>(null),
     contextDialog = useRef<HTMLDialogElement>(null),
     workflowDialog = useRef<HTMLDialogElement>(null),
+    memoryDialog = useRef<HTMLDialogElement>(null),
     sourceDialog = useRef<HTMLDialogElement>(null),
     paperDialog = useRef<HTMLDialogElement>(null),
     layout = useRef<HTMLDivElement>(null),
@@ -125,7 +128,8 @@ export default function App() {
       key: string;
       sources: ExternalSource[];
     } | null>(null),
-    [paperTags, setPaperTags] = useState("");
+    [paperTags, setPaperTags] = useState(""),
+    [memoryText, setMemoryText] = useState("");
   const abort = useRef<AbortController | null>(null),
     epoch = useRef(0),
     messageEpoch = useRef(0),
@@ -212,13 +216,16 @@ export default function App() {
     setThread(t);
     setMessages([]);
     setRuns([]);
-    const [m, r] = await Promise.all([
+    setMemory(null);
+    const [m, r, memoryState] = await Promise.all([
       api<Message[]>(`/threads/${t.id}/messages`),
       api<Run[]>(`/threads/${t.id}/runs`),
+      api<MemoryState>(`/threads/${t.id}/memory`),
     ]);
     if (id === messageEpoch.current) {
       setMessages(m);
       setRuns(r);
+      setMemory(memoryState);
     }
   }
   async function openPaper(p: Paper, preferredThread?: string) {
@@ -234,6 +241,7 @@ export default function App() {
     setMessages([]);
     setThreads([]);
     setRuns([]);
+    setMemory(null);
     const ts = await api<Thread[]>(`/papers/${p.id}/threads`);
     if (id !== epoch.current) return;
     setThreads(ts);
@@ -473,6 +481,7 @@ export default function App() {
       setThread(null);
       setMessages([]);
       setRuns([]);
+      setMemory(null);
       if (remaining.length) {
         await loadThread(remaining[0]);
         await api("/session", "PUT", {
@@ -498,6 +507,79 @@ export default function App() {
         old.map((item) => (item.id === updated.id ? updated : item)),
       );
       setContext(null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function openMemory() {
+    if (!thread) return;
+    setBusy(true);
+    try {
+      const value = await api<MemoryState>(`/threads/${thread.id}/memory`);
+      setMemory(value);
+      setMemoryText(value.draft?.summary || value.active?.summary || "");
+      setError("");
+      memoryDialog.current?.showModal();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function generateMemoryDraft() {
+    if (!thread) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await api<MemoryState>(
+        `/threads/${thread.id}/memory/draft`,
+        "POST",
+      );
+      setMemory(value);
+      setMemoryText(value.draft?.summary || "");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveMemoryDraft(activate: boolean) {
+    if (!thread || !memory?.draft || !memoryText.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      let value = await api<MemoryState>(
+        `/threads/${thread.id}/memory/${memory.draft.id}`,
+        "PUT",
+        { summary: memoryText },
+      );
+      if (activate)
+        value = await api<MemoryState>(
+          `/threads/${thread.id}/memory/${memory.draft.id}/activate`,
+          "POST",
+        );
+      setMemory(value);
+      setMemoryText(value.draft?.summary || value.active?.summary || "");
+      if (activate) memoryDialog.current?.close();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeMemory(identifier: string) {
+    if (!thread) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await api<MemoryState>(
+        `/threads/${thread.id}/memory/${identifier}`,
+        "DELETE",
+      );
+      setMemory(value);
+      setMemoryText(value.draft?.summary || value.active?.summary || "");
     } catch (e) {
       fail(e);
     } finally {
@@ -1055,6 +1137,15 @@ export default function App() {
                   onClick={() => void updateContextMode("full")}
                 >
                   Full paper
+                </button>
+                <button
+                  className={memory?.active ? "active memory-button" : "memory-button"}
+                  disabled={generating || busy}
+                  onClick={() => void openMemory()}
+                  title="查看并管理这个主题的长期记忆"
+                >
+                  Memory{memory?.active ? " ✓" : ""}
+                  {memory?.recommended && !memory.draft ? " · 建议" : ""}
                 </button>
               </div>
             )}
@@ -1708,6 +1799,10 @@ export default function App() {
                 `覆盖 ${context.coverage.pages_included.length} / ${context.coverage.total_pages} 个 PDF 页面 · `}
               {context.characters.toLocaleString()} 字符 ·{" "}
               {context.history_messages} 条历史消息
+              {context.memory?.confirmed_notes
+                ? ` · ${context.memory.confirmed_notes} 条已确认笔记`
+                : ""}
+              {context.memory?.active ? " · 使用已确认主题记忆" : ""}
               {context.image_attached ? " · 含选区图像" : ""}
             </p>
             {context.sources.map((s, index) => (
@@ -1732,6 +1827,101 @@ export default function App() {
                 <pre>{s.text || "本页未提取到文字。图表请使用框选。"}</pre>
               </details>
             ))}
+          </>
+        )}
+      </dialog>
+      <dialog className="memory-dialog" ref={memoryDialog}>
+        <DialogTitle
+          title="主题记忆与历史压缩"
+          close={() => memoryDialog.current?.close()}
+        />
+        {dialogError}
+        <p className="small muted">
+          完整对话始终保存在本地。启用压缩后，后续请求使用已确认摘要和摘要之后的新消息；不会删除或改写原对话。
+        </p>
+        {memory && (
+          <>
+            <div className="memory-stats">
+              <span>{memory.active ? "长期记忆已启用" : "当前使用原始历史"}</span>
+              <span>
+                待压缩 {memory.eligible_messages} 条 · {memory.eligible_characters.toLocaleString()} 字符
+              </span>
+            </div>
+            {memory.draft ? (
+              <>
+                <label>
+                  压缩草稿
+                  <textarea
+                    autoFocus
+                    value={memoryText}
+                    onChange={(event) => setMemoryText(event.target.value)}
+                  />
+                </label>
+                <p className="small muted">
+                  覆盖 {memory.draft.source_message_count} 条消息 · {memory.draft.model}
+                  {memory.draft.usage?.tokens?.prompt_cache_hit_tokens != null
+                    ? ` · Cache hit ${memory.draft.usage.tokens.prompt_cache_hit_tokens} / miss ${memory.draft.usage.tokens.prompt_cache_miss_tokens ?? "—"} tokens`
+                    : ""}
+                  {memory.draft.usage?.finish_reason === "length"
+                    ? " · 草稿达到输出上限，请审阅补全"
+                    : ""}
+                </p>
+                <div className="dialog-actions split-actions">
+                  <button
+                    disabled={busy}
+                    onClick={() => void removeMemory(memory.draft!.id)}
+                  >
+                    放弃草稿
+                  </button>
+                  <span />
+                  <button
+                    disabled={busy || !memoryText.trim()}
+                    onClick={() => void saveMemoryDraft(false)}
+                  >
+                    保存修改
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy || !memoryText.trim()}
+                    onClick={() => void saveMemoryDraft(true)}
+                  >
+                    <Check size={15} /> 确认并启用
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {memory.active && (
+                  <section className="active-memory">
+                    <h3>已确认的长期记忆</h3>
+                    <pre>{memory.active.summary}</pre>
+                    <p className="small muted">
+                      覆盖到此前 {memory.active.source_message_count} 条消息的增量批次；较新的消息仍以原文形式进入 context。
+                    </p>
+                  </section>
+                )}
+                <div className="dialog-actions">
+                  {memory.active && (
+                    <button
+                      disabled={busy}
+                      onClick={() => void removeMemory(memory.active!.id)}
+                    >
+                      停用长期记忆
+                    </button>
+                  )}
+                  <button
+                    className="primary"
+                    disabled={busy || memory.eligible_messages < 2}
+                    onClick={() => void generateMemoryDraft()}
+                  >
+                    {busy ? "正在生成…" : "生成压缩草稿（调用模型）"}
+                  </button>
+                </div>
+                {memory.eligible_messages < 2 && (
+                  <p className="small muted">至少积累一轮尚未压缩的问答后才能生成新草稿。</p>
+                )}
+              </>
+            )}
           </>
         )}
       </dialog>

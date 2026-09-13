@@ -49,6 +49,13 @@ export type Context = {
   history_messages: number;
   scope: string;
   context_mode?: "focused" | "full";
+  memory?: {
+    active: boolean;
+    compaction_id: string | null;
+    through_rowid: number | null;
+    confirmed_notes: number;
+    note_characters: number;
+  };
   image_attached: boolean;
   anchor: Anchor | null;
   external_sources?: ExternalSource[];
@@ -58,6 +65,29 @@ export type Context = {
     extractable_pages?: number;
     complete_text?: boolean;
   };
+};
+export type MemoryCompaction = {
+  id: string;
+  summary: string;
+  status: "draft" | "active" | "superseded";
+  through_rowid: number;
+  source_message_count: number;
+  provider: string;
+  model: string;
+  usage: {
+    tokens: Record<string, number> | null;
+    finish_reason: string | null;
+    input_characters: number;
+  } | null;
+  created_at: string;
+  updated_at: string;
+};
+export type MemoryState = {
+  active: MemoryCompaction | null;
+  draft: MemoryCompaction | null;
+  eligible_messages: number;
+  eligible_characters: number;
+  recommended: boolean;
 };
 export type Message = {
   id: string;

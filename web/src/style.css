@@ -1111,6 +1111,51 @@ hr {
   line-height: 1.8;
   font-size: 15px;
 }
+.memory-dialog {
+  width: min(820px, 92vw);
+}
+.memory-dialog textarea {
+  width: 100%;
+  min-height: 42dvh;
+  resize: vertical;
+  padding: 14px;
+  border: 1px solid #d5dfcc;
+  border-radius: 7px;
+  line-height: 1.75;
+  font-size: 14px;
+}
+.memory-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 13px;
+  margin: 15px 0;
+  border-radius: 7px;
+  background: #f1f5ed;
+  color: #50634e;
+  font-size: 12px;
+}
+.active-memory {
+  margin-top: 16px;
+}
+.active-memory h3 {
+  font-size: 15px;
+}
+.active-memory pre {
+  max-height: 45dvh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  border: 1px solid #dde5d3;
+  border-radius: 7px;
+  background: #fbfcf9;
+  font: inherit;
+  line-height: 1.7;
+}
+.split-actions > span {
+  flex: 1;
+}
 .context-dialog {
   width: min(780px, 92vw);
 }

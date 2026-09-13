@@ -171,6 +171,22 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(first_packet["context_mode"], "full")
         self.assertEqual(second_packet["coverage"]["pages_included"], [1, 2, 3])
 
+    def test_confirmed_notes_are_bounded_long_term_context(self):
+        self.db.execute(
+            "INSERT INTO notes VALUES (?,?,?,?,?,?,?)",
+            (
+                "note1", "paper", None, "Confirmed tensor-parallel insight.",
+                None, stamp(), stamp(),
+            ),
+        )
+        packet, messages = build_context(
+            self.db, self.paper, "topic", "continue", None
+        )
+        rendered = "\n".join(message["content"] for message in messages)
+        self.assertEqual(packet["memory"]["confirmed_notes"], 1)
+        self.assertIn("Confirmed tensor-parallel insight", rendered)
+        self.assertIn("NOTE 标签不是论文证据引用", rendered)
+
     def test_anchor_rejects_wrong_source_and_nonfinite_coordinates(self):
         a = {
             "sha256": SHA,
@@ -224,11 +240,20 @@ class ContextTests(unittest.TestCase):
                 columns = [row[1] for row in migrated.conn.execute("PRAGMA table_info(runs)")]
                 self.assertIn("trace", columns)
                 self.assertEqual(
-                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 4
+                    migrated.conn.execute("PRAGMA user_version").fetchone()[0], 5
                 )
                 self.assertIn(
                     "context_mode",
                     {row[1] for row in migrated.conn.execute("PRAGMA table_info(threads)")},
+                )
+                self.assertIn(
+                    "memory_compactions",
+                    {
+                        row[0]
+                        for row in migrated.conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    },
                 )
             finally:
                 migrated.close()
@@ -335,6 +360,59 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["context_mode"], "full")
         threads = (await self.client.get("/api/papers/paper/threads")).json()
         self.assertEqual(threads[0]["context_mode"], "full")
+
+    async def test_reviewed_memory_compaction_replaces_only_working_history(self):
+        for identifier, role, content in (
+            ("u1", "user", "Explain the interrupt path."),
+            ("a1", "assistant", "The interrupt path uses the VGIC [p.1 ¶1]."),
+        ):
+            self.db.execute(
+                "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
+                (identifier, "topic", role, content, None, None, "complete", None, stamp()),
+            )
+        calls = []
+
+        async def fake(settings, key, messages):
+            calls.append(messages)
+            yield {"type": "delta", "text": "## 已建立的理解\nVGIC path [p.1 ¶1]."}
+            yield {"type": "usage", "usage": {"prompt_tokens": 120}}
+            yield {"type": "finish", "reason": "stop"}
+
+        initial = (await self.client.get("/api/threads/topic/memory")).json()
+        self.assertEqual(initial["eligible_messages"], 2)
+        self.assertIsNone(initial["active"])
+        with patch("paper_lab.api.stream_completion", fake):
+            response = await self.client.post("/api/threads/topic/memory/draft")
+        self.assertEqual(response.status_code, 200, response.text)
+        state = response.json()
+        self.assertIsNone(state["active"])
+        self.assertEqual(state["draft"]["source_message_count"], 2)
+        self.assertIn("[M:u1]", calls[0][-1]["content"])
+        draft_id = state["draft"]["id"]
+        edited = await self.client.put(
+            f"/api/threads/topic/memory/{draft_id}",
+            json={"summary": "用户确认的 VGIC 记忆 [p.1 ¶1]."},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        activated = await self.client.post(
+            f"/api/threads/topic/memory/{draft_id}/activate"
+        )
+        self.assertEqual(activated.status_code, 200, activated.text)
+        packet, prompt = build_context(
+            self.db, self.db.one("SELECT * FROM papers"), "topic", "continue", None
+        )
+        rendered = "\n".join(item["content"] for item in prompt)
+        self.assertTrue(packet["memory"]["active"])
+        self.assertIn("用户确认的 VGIC 记忆", rendered)
+        self.assertNotIn("Explain the interrupt path", rendered)
+        self.assertEqual(
+            len((await self.client.get("/api/threads/topic/messages")).json()), 2
+        )
+        disabled = await self.client.delete(
+            f"/api/threads/topic/memory/{draft_id}"
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertIsNone(disabled.json()["active"])
 
     async def test_paper_identity_and_user_tags_are_separate_from_pdf_storage(self):
         paper = (await self.client.get("/api/papers")).json()[0]

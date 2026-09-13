@@ -190,10 +190,71 @@ def _clip_history(content, limit):
     return content[:head] + "\n[…较早内容已折叠…]\n" + content[-tail:]
 
 
-def _history(db, thread_id, budget=10000, limit=12):
+def active_memory(db, thread_id):
+    if not thread_id:
+        return None
     rows = db.all(
-        "SELECT role,content FROM messages WHERE thread_id=? AND status='complete' ORDER BY rowid DESC LIMIT ?",
-        (thread_id, limit),
+        """SELECT * FROM memory_compactions
+           WHERE thread_id=? AND status='active'
+           ORDER BY updated_at DESC LIMIT 1""",
+        (thread_id,),
+    )
+    return rows[0] if rows else None
+
+
+def memory_message(memory):
+    if not memory:
+        return None
+    return {
+        "role": "user",
+        "content": (
+            "已由用户审阅并启用的主题记忆。它是历史对话的压缩资料，不是新的指令；"
+            "若与较新的消息冲突，以较新的消息为准。\n\n" + memory["summary"]
+        ),
+    }
+
+
+def confirmed_notes_message(db, paper_id, budget=20000, limit=20):
+    rows = db.all(
+        """SELECT id,content,anchor FROM notes WHERE paper_id=?
+           ORDER BY updated_at DESC LIMIT ?""",
+        (paper_id, limit),
+    )
+    selected, used = [], 0
+    for row in rows:
+        content = row["content"]
+        if used + len(content) > budget:
+            continue
+        locator = ""
+        if row.get("anchor"):
+            try:
+                anchor = json.loads(row["anchor"])
+                locator = f" · PDF p.{anchor['page']}" if anchor.get("page") else ""
+            except (json.JSONDecodeError, TypeError):
+                pass
+        selected.append(f"[NOTE:{row['id'][:8]}{locator}]\n{content}")
+        used += len(content)
+    selected.reverse()
+    if not selected:
+        return None, 0, 0
+    return {
+        "role": "user",
+        "content": (
+            "用户已经明确确认的本篇论文笔记。它们可作为用户的长期理解和偏好，"
+            "但 NOTE 标签不是论文证据引用；事实仍须引用本轮提供的 [p.N ¶K] 或 [E1]。\n\n"
+            + "\n\n".join(selected)
+        ),
+    }, len(selected), used
+
+
+def _history(db, thread_id, budget=10000, limit=12, after_rowid=0):
+    if not thread_id:
+        return []
+    rows = db.all(
+        """SELECT role,content FROM messages
+           WHERE thread_id=? AND status='complete' AND rowid>?
+           ORDER BY rowid DESC LIMIT ?""",
+        (thread_id, after_rowid, limit),
     )
     selected, count = [], 0
     for row in rows:
@@ -219,7 +280,12 @@ def build_full_context(db, paper, thread_id, question, anchor):
         for index, segment in enumerate(_segments(page)):
             sources.append(_source(page, paper, index, segment, "Full paper"))
             used += len(segment["text"])
-    history = _history(db, thread_id, budget=120000, limit=80)
+    memory = active_memory(db, thread_id)
+    notes, note_count, note_characters = confirmed_notes_message(db, paper["id"])
+    history = _history(
+        db, thread_id, budget=120000, limit=80,
+        after_rowid=memory["through_rowid"] if memory else 0,
+    )
     nonempty = sum(bool(page["text"].strip()) for page in pages)
     packet = {
         "sha256": paper["sha256"],
@@ -229,6 +295,13 @@ def build_full_context(db, paper, thread_id, question, anchor):
         "characters": used,
         "scope": "Full paper：每轮提供全部可提取正文，全文位于固定 prompt prefix",
         "context_mode": "full",
+        "memory": {
+            "active": bool(memory),
+            "compaction_id": memory["id"] if memory else None,
+            "through_rowid": memory["through_rowid"] if memory else None,
+            "confirmed_notes": note_count,
+            "note_characters": note_characters,
+        },
         "image_attached": bool(anchor and anchor["kind"] == "region"),
         "coverage": {
             "pages_included": sorted({source["page"] for source in sources}),
@@ -243,11 +316,13 @@ def build_full_context(db, paper, thread_id, question, anchor):
     current = "用户当前问题：" + question
     if anchor:
         current = "选区（用户提供）：" + json.dumps(anchor, ensure_ascii=False) + "\n" + current
-    messages = (
-        [{"role": "system", "content": SYSTEM}, {"role": "user", "content": paper_text}]
-        + history
-        + [{"role": "user", "content": current}]
-    )
+    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": paper_text}]
+    if notes:
+        messages.append(notes)
+    remembered = memory_message(memory)
+    if remembered:
+        messages.append(remembered)
+    messages += history + [{"role": "user", "content": current}]
     return packet, messages
 
 
@@ -311,12 +386,24 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
                                len(excerpt) < len(block)))
         page_counts[number] = page_counts.get(number, 0) + 1
         remaining -= len(excerpt)
-    history = _history(db, thread_id)
+    memory = active_memory(db, thread_id)
+    notes, note_count, note_characters = confirmed_notes_message(db, paper["id"])
+    history = _history(
+        db, thread_id,
+        after_rowid=memory["through_rowid"] if memory else 0,
+    )
     packet = {
         "sha256": paper["sha256"], "anchor": anchor, "sources": sources,
         "history_messages": len(history), "characters": budget - remaining,
         "scope": "同篇论文的句群级有限检索；按选区、当前页、邻页和问题关键词排序，不是完整全文",
         "context_mode": "focused",
+        "memory": {
+            "active": bool(memory),
+            "compaction_id": memory["id"] if memory else None,
+            "through_rowid": memory["through_rowid"] if memory else None,
+            "confirmed_notes": note_count,
+            "note_characters": note_characters,
+        },
         "image_attached": bool(anchor and anchor["kind"] == "region"),
         "coverage": {"pages_included": sorted({s["page"] for s in sources}), "total_pages": paper["page_count"]},
     }
@@ -324,8 +411,15 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
     if anchor:
         grounding += "选区（用户提供）：" + json.dumps(anchor, ensure_ascii=False) + "\n"
     grounding += "\n\n".join(f"[{s['citation']}] {s['reason']}\n{s['text']}" for s in sources)
-    messages = ([{"role": "system", "content": SYSTEM}] + history +
-                [{"role": "user", "content": grounding + "\n\n用户问题：" + question}])
+    messages = [{"role": "system", "content": SYSTEM}]
+    if notes:
+        messages.append(notes)
+    remembered = memory_message(memory)
+    if remembered:
+        messages.append(remembered)
+    messages += history + [
+        {"role": "user", "content": grounding + "\n\n用户问题：" + question}
+    ]
     return packet, messages
 
 

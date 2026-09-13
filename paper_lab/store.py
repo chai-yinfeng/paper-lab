@@ -47,10 +47,17 @@ CREATE TABLE IF NOT EXISTS runs (
  workflow TEXT NOT NULL, status TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
  usage TEXT, trace TEXT, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);
 CREATE INDEX IF NOT EXISTS runs_thread ON runs(thread_id, created_at);
+CREATE TABLE IF NOT EXISTS memory_compactions (
+ id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id),
+ summary TEXT NOT NULL, status TEXT NOT NULL, through_rowid INTEGER NOT NULL,
+ source_message_count INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+ usage TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS memory_compactions_thread
+ ON memory_compactions(thread_id, status, updated_at);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Store:

@@ -16,6 +16,8 @@
   OpenAlex abstract。外部 evidence 以 `[E1]` 引用并保存 exact excerpt、locator、链接和 provider。
 - 论文实体按 PDF SHA256 去重；列表显示不可编辑标题、派生 citation key，并允许用户添加多个自定义标签。
 - 对话自动保存，笔记手动确认、编辑、导出 Markdown。
+- 已确认的本篇笔记作为有界长期 context；每个主题可显式生成历史压缩草稿，编辑确认后启用，
+  原消息始终保留。后续压缩只处理上次 cutoff 之后的新消息。
 - DeepSeek 与 OpenAI-compatible provider 接口；默认 `deepseek-flash`（V4.1 Flash）。
 - 每次输出上限，run 按阶段保存 draft、review、状态与 usage；失败不自动重试、不自动启动更多 agent。
 
@@ -76,7 +78,7 @@ DeepSeek 默认关闭 thinking，回答输出上限为 4096 tokens，可以在�
 用户选择的工作目录/
   workspace.json       目录与 schema 标记
   pdfs/<sha256>.pdf     论文实体；不依赖原始下载文件仍在原位
-  library.sqlite3      论文、逐页文字、主题、对话、笔记、usage、设置与进度
+  library.sqlite3      论文、逐页文字、主题、对话、笔记、memory、usage、设置与进度
   cache/               导入和渲染的临时文件
 ```
 
