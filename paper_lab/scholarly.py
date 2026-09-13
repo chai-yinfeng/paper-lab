@@ -23,10 +23,7 @@ def _authors(value):
     return result[:12]
 
 
-async def search_academic(query: str, limit: int = 5):
-    query = " ".join(query.split())[:300]
-    if len(query) < 2:
-        return []
+async def _search_semantic_scholar(query: str, limit: int):
     async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
         response = await client.get(ENDPOINT, params={"query": query, "limit": limit})
         response.raise_for_status()
@@ -92,6 +89,89 @@ async def search_academic(query: str, limit: int = 5):
     return results
 
 
+def _openalex_abstract(index):
+    positions = [position for values in (index or {}).values() for position in values]
+    if not positions:
+        return ""
+    words = [""] * (max(positions) + 1)
+    for word, values in index.items():
+        for position in values:
+            if isinstance(position, int) and 0 <= position < len(words):
+                words[position] = str(word)
+    return " ".join(word for word in words if word)
+
+
+async def _search_openalex(query: str, limit: int):
+    fields = (
+        "id,display_name,authorships,publication_year,primary_location,"
+        "doi,ids,abstract_inverted_index"
+    )
+    async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
+        response = await client.get(
+            "https://api.openalex.org/works",
+            params={"search": query, "per-page": limit, "select": fields},
+        )
+        response.raise_for_status()
+    results = []
+    for work in response.json().get("results", [])[:limit]:
+        abstract = _openalex_abstract(work.get("abstract_inverted_index"))
+        quote = " ".join(abstract.split())
+        if len(quote) > 3000:
+            quote = quote[:3000].rsplit(" ", 1)[0]
+        if not quote:
+            continue
+        location = work.get("primary_location") or {}
+        ids = work.get("ids") or {}
+        url = str(
+            location.get("landing_page_url")
+            or work.get("doi")
+            or work.get("id")
+            or ""
+        )
+        arxiv = None
+        for value in ids.values():
+            match = ARXIV_IN_TEXT.search(str(value))
+            if match:
+                arxiv = match.group(1)
+                break
+        results.append(
+            {
+                "citation": f"E{len(results) + 1}",
+                "title": " ".join(str(work.get("display_name") or "Untitled source").split())[:500],
+                "authors": _authors(
+                    [entry.get("author") for entry in work.get("authorships") or []]
+                ),
+                "year": work.get("publication_year"),
+                "url": url,
+                "locator": "abstract",
+                "quote": quote,
+                "offset": None,
+                "source_type": "academic-abstract",
+                "provider": "OpenAlex",
+                "arxiv_id": arxiv,
+                "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "content_hash": hashlib.sha256(quote.encode()).hexdigest(),
+            }
+        )
+    return results
+
+
+async def search_academic(query: str, limit: int = 5):
+    query = " ".join(query.split())[:300]
+    if len(query) < 2:
+        return []
+    try:
+        results = await _search_semantic_scholar(query, limit)
+        if results:
+            return results
+    except httpx.HTTPError:
+        pass
+    try:
+        return await _search_openalex(query, limit)
+    except httpx.HTTPError as exc:
+        raise ValueError("学术检索服务暂时不可用或受到限流，请稍后重试。") from exc
+
+
 def normalize_sources(values):
     """Validate client-echoed preview results before placing them in model context."""
     results = []
@@ -103,6 +183,12 @@ def normalize_sources(values):
         quote = " ".join(str(value.get("quote") or "").split())[:3000]
         if not quote:
             continue
+        provider = str(value.get("provider") or "")
+        if provider not in ("Semantic Scholar", "OpenAlex"):
+            provider = "Semantic Scholar"
+        source_type = str(value.get("source_type") or "")
+        if source_type not in ("academic-snippet", "academic-abstract"):
+            source_type = "academic-snippet"
         results.append(
             {
                 "citation": f"E{len(results) + 1}",
@@ -113,8 +199,8 @@ def normalize_sources(values):
                 "locator": str(value.get("locator") or "excerpt")[:300],
                 "quote": quote,
                 "offset": value.get("offset"),
-                "source_type": "academic-snippet",
-                "provider": "Semantic Scholar",
+                "source_type": source_type,
+                "provider": provider,
                 "arxiv_id": (
                     str(value["arxiv_id"])[:30]
                     if value.get("arxiv_id") and ARXIV_IN_TEXT.fullmatch(str(value["arxiv_id"]))

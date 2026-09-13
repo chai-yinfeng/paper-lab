@@ -20,6 +20,7 @@ from paper_lab.keychain import get_key as keychain_get
 from paper_lab.keychain import set_key as keychain_set
 from paper_lab.preferences import recent_workspace, remember_workspace
 from paper_lab.providers import ProviderSettings, payload, stream_completion
+from paper_lab.scholarly import normalize_sources, search_academic
 from paper_lab.store import Store, stamp
 from paper_lab.workspace import Workspace, REPO
 
@@ -320,7 +321,6 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         message = (await self.client.get("/api/threads/topic/messages")).json()[-1]
         self.assertEqual(message["context"]["external_sources"][0]["citation"], "E1")
         self.assertEqual(message["context"]["external_sources"][0]["quote"], source["quote"])
-
     async def test_delete_topic_preserves_confirmed_note(self):
         self.db.execute(
             "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
@@ -596,6 +596,43 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len(self.db.all("SELECT * FROM pages WHERE paper_id=?", (first["id"],))), 1
         )
+
+
+class ScholarlyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_openalex_fallback_preserves_verifiable_source_type(self):
+        async def limited(*args):
+            request = httpx.Request("GET", "https://api.semanticscholar.org")
+            response = httpx.Response(429, request=request)
+            raise httpx.HTTPStatusError("limited", request=request, response=response)
+
+        source = {
+            "citation": "E1",
+            "title": "Fallback paper",
+            "authors": ["A. Author"],
+            "year": 2025,
+            "url": "https://openalex.org/W1",
+            "locator": "abstract",
+            "quote": "An exact abstract excerpt.",
+            "offset": None,
+            "source_type": "academic-abstract",
+            "provider": "OpenAlex",
+            "arxiv_id": None,
+            "retrieved_at": "2026-09-12T00:00:00+00:00",
+            "content_hash": "ignored",
+        }
+
+        async def fallback(*args):
+            return [source]
+
+        with (
+            patch("paper_lab.scholarly._search_semantic_scholar", limited),
+            patch("paper_lab.scholarly._search_openalex", fallback),
+        ):
+            results = await search_academic("attention")
+        self.assertEqual(results[0]["provider"], "OpenAlex")
+        normalized = normalize_sources(results)
+        self.assertEqual(normalized[0]["provider"], "OpenAlex")
+        self.assertEqual(normalized[0]["source_type"], "academic-abstract")
 
 
 class KeychainTests(unittest.TestCase):

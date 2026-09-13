@@ -25,9 +25,11 @@ file-based acceptance tests. No real-paper validation or paid API call is part o
 
 Academic search is explicitly enabled per question and is independent of the LLM provider. Semantic Scholar
 snippet results are normalized into bounded `[E1]` evidence records containing an exact excerpt, locator,
-canonical link and provider. The records are saved in the assistant message's context snapshot. Search snippets
-without a fetched PDF never receive an invented page number. An arXiv-backed source can be downloaded into the
-main SHA256-deduplicated library; Paper Lab then attempts an exact word-sequence match to recover page boxes.
+canonical link and provider. If its anonymous endpoint is rate-limited, OpenAlex abstracts provide the same
+verifiable record shape and retain their provider/type provenance. The records are saved in the assistant message's
+context snapshot. Sources without a fetched PDF never receive an invented page number. An arXiv-backed source can
+be downloaded into the main SHA256-deduplicated library; Paper Lab then attempts an exact word-sequence match to
+recover page boxes.
 
 SQLite foreign keys and transactions protect relationships. `PRAGMA user_version` is the migration boundary;
 unknown newer versions are rejected. Import writes a validated PDF before committing its database record;
@@ -46,8 +48,9 @@ stop the application before copying it. No automatic migration of previous counc
    The preview states why every excerpt was selected and shows the exact text before a paid call.
 5. Region questions attach a bounded PNG rendered by Poppler; text questions send text. No OCR is silently
    substituted. Image-only pages require a vision-enabled provider and a region selection.
-6. Answers use `[p.N]`; only supplied source pages become clickable citations. These are locators, not proof
-   that a generated claim is true. Saved user anchors restore highlights; generated page citations return to a page.
+6. Answers use `[p.N ¶K]`; only supplied source groups become clickable citations. These are locators, not proof
+   that a generated claim is true. Saved and generated anchors scroll to the group position within the page and
+   restore its word-level highlight.
 7. The user confirms/edits an answer to create a note. Reading position and selected topic can be resumed.
 8. Reading-before and reading-after summaries each use one Specialist call and send all extracted text without an
    application input or output cap on DeepSeek; the request uses the provider's documented maximum output allowance.

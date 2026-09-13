@@ -111,10 +111,23 @@ export default function PdfReader({
       internalPage.current = null;
       return;
     }
-    requestAnimationFrame(() =>
-      pageElements.current.get(page)?.scrollIntoView({ block: "start" }),
-    );
-  }, [page, ratios.length, width, zoom]);
+    requestAnimationFrame(() => {
+      const root = scroll.current;
+      const target = pageElements.current.get(page);
+      if (!root || !target) return;
+      const rootBox = root.getBoundingClientRect();
+      const targetBox = target.getBoundingClientRect();
+      const anchorY =
+        anchor?.page === page && anchor.rects.length ? anchor.rects[0][1] : 0;
+      const top =
+        root.scrollTop +
+        targetBox.top -
+        rootBox.top +
+        anchorY * targetBox.height -
+        (anchorY ? Math.min(rootBox.height * 0.22, 180) : 0);
+      root.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    });
+  }, [page, anchor, ratios.length, width, zoom]);
   function goTo(target: number, behavior: ScrollBehavior = "smooth") {
     if (target < 1 || target > paper.page_count) return;
     setPage(target);
