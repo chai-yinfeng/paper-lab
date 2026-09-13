@@ -27,22 +27,55 @@ def _terms(text):
     return set(english + chinese) - STOP
 
 
-def _windows(text, size=2200, overlap=250):
-    blocks = [b.strip() for b in re.split(r"\n\s*\n+", text) if b.strip()]
-    if len(blocks) > 1:
-        return blocks
-    if len(text) <= size:
-        return [text]
-    return [text[i : i + size] for i in range(0, len(text), size - overlap)]
-
-
-def _source_anchor(page, paper, excerpt):
-    """Locate the start of an extracted passage without trusting the model for coordinates."""
+def _page_words(page):
     raw = page.get("words") or "[]"
     try:
         words = json.loads(raw) if isinstance(raw, str) else raw
     except json.JSONDecodeError:
-        return None
+        words = []
+    return words if isinstance(words, list) else []
+
+
+def _segments(page, target=520, minimum=240, maximum=760):
+    """Create compact sentence groups and retain their exact PDF word range."""
+    positioned = _page_words(page)
+    tokens = [str(word.get("text", "")).strip() for word in positioned]
+    tokens = [token for token in tokens if token]
+    has_positions = len(tokens) == len(positioned) and bool(positioned)
+    if not tokens:
+        tokens = re.findall(r"\S+", page.get("text") or "")
+    if not tokens:
+        return []
+
+    sentence_end = re.compile(r"[.!?。！？][\"'”’）)\]]*$")
+    clause_end = re.compile(r"[,;:，；：][\"'”’）)\]]*$")
+    result = []
+    start = 0
+    length = 0
+    for index, token in enumerate(tokens):
+        length += len(token) + (1 if index > start else 0)
+        should_close = (
+            (length >= minimum and bool(sentence_end.search(token)))
+            or (length >= target and bool(clause_end.search(token)))
+            or length >= maximum
+        )
+        if not should_close and index + 1 < len(tokens):
+            continue
+        end = index + 1
+        result.append(
+            {
+                "text": " ".join(tokens[start:end]),
+                "word_start": start if has_positions else None,
+                "word_end": end if has_positions else None,
+            }
+        )
+        start, length = end, 0
+    return result
+
+
+def _source_anchor(page, paper, excerpt):
+    """Locate the start of an extracted passage without trusting the model for coordinates."""
+    words = _page_words(page)
     targets = excerpt.split()
     haystack = [str(word.get("text", "")) for word in words]
     match = None
@@ -59,7 +92,7 @@ def _source_anchor(page, paper, excerpt):
             break
     if match is None:
         return None
-    count = min(60, len(targets) - target_offset, len(words) - match)
+    count = min(len(targets) - target_offset, len(words) - match)
     rects = [word.get("rect") for word in words[match : match + count]]
     rects = [rect for rect in rects if isinstance(rect, list) and len(rect) == 4]
     if not rects:
@@ -98,7 +131,24 @@ def add_external_sources(packet, messages, sources):
     return packet, messages
 
 
-def _source(page, paper, index, text, reason, truncated=False):
+def _source(page, paper, index, segment, reason, truncated=False):
+    text = segment["text"]
+    start, end = segment.get("word_start"), segment.get("word_end")
+    anchor = None
+    if isinstance(start, int) and isinstance(end, int):
+        words = _page_words(page)[start:end]
+        rects = [word.get("rect") for word in words]
+        rects = [rect for rect in rects if isinstance(rect, list) and len(rect) == 4]
+        if rects:
+            anchor = {
+                "sha256": paper["sha256"],
+                "page": page["number"],
+                "kind": "text",
+                "rects": rects,
+                "quote": text,
+            }
+    if anchor is None:
+        anchor = _source_anchor(page, paper, text)
     return {
         "page": page["number"],
         "paragraph": index + 1,
@@ -106,7 +156,7 @@ def _source(page, paper, index, text, reason, truncated=False):
         "text": text,
         "reason": reason,
         "truncated": truncated,
-        "anchor": _source_anchor(page, paper, text),
+        "anchor": anchor,
     }
 
 
@@ -137,12 +187,13 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
     candidates = []
     quote = (anchor or {}).get("quote", "").strip()
     for p in pages:
-        for index, block in enumerate(_windows(p["text"])):
+        for index, segment in enumerate(_segments(p)):
+            block = segment["text"]
             score = sum(block.lower().count(term.lower()) for term in terms)
             score += 8 if p["number"] == current else 3 if abs(p["number"] - current) == 1 else 0
             score += 1 if p["number"] == 1 else 0
             score += 1000 if quote and quote[:80] in block else 0
-            candidates.append((score, p, index, block))
+            candidates.append((score, p, index, segment))
     candidates.sort(
         key=lambda item: (
             -item[0],
@@ -152,15 +203,24 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
         )
     )
     sources, remaining, page_counts = [], budget, {}
-    for score, source_page, source_index, block in candidates:
+    for score, source_page, source_index, segment in candidates:
+        block = segment["text"]
         number = source_page["number"]
-        if remaining <= 0 or len(sources) >= 10:
+        if remaining <= 0 or len(sources) >= 24:
             break
         if score <= 0 and sources:
             continue
-        if page_counts.get(number, 0) >= (2 if number == current else 1):
+        if page_counts.get(number, 0) >= (8 if number == current else 2 if abs(number - current) == 1 else 1):
             continue
-        excerpt = block[: min(3200, remaining)]
+        excerpt = block[:remaining]
+        if len(excerpt) < len(block):
+            excerpt = excerpt.rsplit(" ", 1)[0]
+        if not excerpt:
+            break
+        selected_segment = dict(segment)
+        selected_segment["text"] = excerpt
+        if len(excerpt) < len(block) and isinstance(segment.get("word_start"), int):
+            selected_segment["word_end"] = segment["word_start"] + len(excerpt.split())
         if quote and quote[:80] in block:
             reason = "选区所在段落"
         elif number == current:
@@ -173,7 +233,7 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
             reason = "论文首页概览"
         else:
             reason = "同篇论文补充"
-        sources.append(_source(source_page, paper, source_index, excerpt, reason,
+        sources.append(_source(source_page, paper, source_index, selected_segment, reason,
                                len(excerpt) < len(block)))
         page_counts[number] = page_counts.get(number, 0) + 1
         remaining -= len(excerpt)
@@ -181,7 +241,7 @@ def build_context(db, paper, thread_id, question, anchor, budget=24000):
     packet = {
         "sha256": paper["sha256"], "anchor": anchor, "sources": sources,
         "history_messages": len(history), "characters": budget - remaining,
-        "scope": "同篇论文的片段级有限检索；按选区、邻页和问题关键词排序，不是完整全文",
+        "scope": "同篇论文的句群级有限检索；按选区、当前页、邻页和问题关键词排序，不是完整全文",
         "image_attached": bool(anchor and anchor["kind"] == "region"),
         "coverage": {"pages_included": sorted({s["page"] for s in sources}), "total_pages": paper["page_count"]},
     }
@@ -200,9 +260,9 @@ def build_summary_context(db, paper, thread_id, purpose):
         raise ValueError("论文尚无可读取页面。")
     sources, used = [], 0
     for p in pages:
-        for index, text in enumerate(_windows(p["text"], overlap=0)):
-            sources.append(_source(p, paper, index, text, "全篇逐页输入"))
-            used += len(text)
+        for index, segment in enumerate(_segments(p)):
+            sources.append(_source(p, paper, index, segment, "全篇逐页输入"))
+            used += len(segment["text"])
     nonempty = sum(bool(p["text"].strip()) for p in pages)
     complete = nonempty == len(pages)
     scope = ("已提供全部可提取正文；Paper Lab 未做字符截断" if complete else

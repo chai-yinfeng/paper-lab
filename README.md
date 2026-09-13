@@ -62,7 +62,8 @@ API key 可以在界面中输入并持久保存在 macOS Keychain，或通过 `D
 不会与其他应用保存的 DeepSeek key 混淆。它不会写入工作目录、浏览器存储或 Git，也不会从状态接口返回。
 未配置 key 时可以阅读 PDF 和管理已有笔记。
 
-DeepSeek 默认关闭 thinking，单次输出上限 4096 tokens；可以在设置中修改。
+DeepSeek 默认关闭 thinking，常规问答输出上限为 4096 tokens，可以在设置中修改；
+全篇概览和总结使用 provider 公布的 maximum output，不沿用常规问答上限。
 官方 API ID 为 `deepseek-flash`，不是 `deepseek-v4.1-flash` 或旧版兼容别名。
 模型与 provider 可以切换；更换 API 地址时会清空会话 key，避免将旧 key 发往新地址。
 兼容 provider 当前使用 Chat Completions 协议，图像能力由设置明确声明；不保证兼容所有厂商扩展。

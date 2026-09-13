@@ -1489,7 +1489,7 @@ export default function App() {
             </select>
           </label>
           <label>
-            每次输出上限
+            常规问答输出上限
             <input
               type="number"
               min={256}
@@ -1692,10 +1692,10 @@ export default function App() {
               </section>
             ) : null}
             <p className="small muted">
-              普通提问先找选区段落，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
-              10 个原文片段、24,000
-              字符。全篇概览/总结发送全部可提取文字，不设应用侧字符上限；最终仍受所选模型的
-              context window 限制。
+              普通提问先找选区句群，再按当前页、相邻页、问题关键词和首页概览排序；最多发送
+              24 个原文片段、24,000
+              字符。全篇概览/总结发送全部可提取文字；DeepSeek 总结使用 provider 的最大输出范围，
+              最终仍受所选模型的 context window 与 maximum output 限制。
             </p>
             <p className="small">
               {context.coverage &&

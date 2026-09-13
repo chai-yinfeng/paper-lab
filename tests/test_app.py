@@ -88,6 +88,30 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(source["anchor"]["rects"][0], [0.1, 0.2, 0.2, 0.22])
         self.assertIn("[p.1 ¶1]", messages[-1]["content"])
 
+    def test_page_is_split_into_precise_sources_with_distinct_word_boxes(self):
+        words = []
+        for sentence in range(8):
+            for word in range(35):
+                token = f"s{sentence}w{word}" + ("." if word == 34 else "")
+                words.append(
+                    {
+                        "text": token,
+                        "rect": [sentence / 10, word / 100, sentence / 10 + 0.01, word / 100 + 0.01],
+                    }
+                )
+        self.db.execute(
+            "UPDATE pages SET text=?,words=? WHERE paper_id=? AND number=1",
+            (" ".join(word["text"] for word in words), json.dumps(words), "paper"),
+        )
+        packet, _ = build_summary_context(self.db, self.paper, "topic", "post-read")
+        page_sources = [source for source in packet["sources"] if source["page"] == 1]
+        self.assertGreater(len(page_sources), 3)
+        self.assertNotEqual(
+            page_sources[0]["anchor"]["rects"][0],
+            page_sources[1]["anchor"]["rects"][0],
+        )
+        self.assertEqual(page_sources[0]["anchor"]["quote"], page_sources[0]["text"])
+
     def test_full_summary_sends_all_extracted_text_without_app_cap(self):
         packet, messages = build_summary_context(
             self.db, self.paper, "topic", "post-read"
@@ -316,7 +340,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         calls = []
 
         async def fake(settings, key, messages):
-            calls.append(messages)
+            calls.append((settings.max_tokens, messages))
             yield {"type": "delta", "text": "Summary [p.1]."}
             yield {"type": "finish", "reason": "stop"}
 
@@ -327,6 +351,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 384000)
         self.assertEqual(self.db.one("SELECT * FROM runs")["workflow"], "specialist")
 
     async def test_missing_key_does_not_create_message_or_run(self):

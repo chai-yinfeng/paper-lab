@@ -428,6 +428,11 @@ def create_app():
             else:
                 anchor = None
                 packet, chat = build_summary_context(db, p, thread_id, body.purpose)
+            completion_settings = (
+                settings.model_copy(update={"max_tokens": 384000})
+                if body.purpose != "question" and settings.provider == "deepseek"
+                else settings
+            )
             if anchor and anchor["kind"] == "region":
                 page = db.one(
                     "SELECT * FROM pages WHERE paper_id=? AND number=?",
@@ -571,13 +576,13 @@ def create_app():
                     }
                     trace["stages"].append(stage)
                     stage_output = ""
-                    async for item in stream_completion(settings, key, phase_messages):
+                    async for item in stream_completion(completion_settings, key, phase_messages):
                         if await request.is_disconnected():
                             raise asyncio.CancelledError()
                         if item["type"] == "delta":
                             stage_output += item["text"]
                             stage["content"] = stage_output
-                            if len(stage_output) > 120000:
+                            if body.purpose == "question" and len(stage_output) > 120000:
                                 raise ValueError("回答超过应用长度限制，已停止。")
                             if phase_name == "specialist":
                                 output += item["text"]
