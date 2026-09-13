@@ -50,9 +50,37 @@ def _segments(page, target=520, minimum=240, maximum=760):
     sentence_end = re.compile(r"[.!?。！？][\"'”’）)\]]*$")
     clause_end = re.compile(r"[,;:，；：][\"'”’）)\]]*$")
     result = []
+
+    def append_segment(start, end):
+        if start >= end:
+            return
+        result.append(
+            {
+                "text": " ".join(tokens[start:end]),
+                "word_start": start if has_positions else None,
+                "word_end": end if has_positions else None,
+            }
+        )
+
+    def layout_rewind(index):
+        if not has_positions or index <= 0:
+            return False
+        previous = positioned[index - 1].get("rect")
+        current = positioned[index].get("rect")
+        return (
+            isinstance(previous, list)
+            and isinstance(current, list)
+            and len(previous) == 4
+            and len(current) == 4
+            and current[1] + 0.08 < previous[1]
+        )
+
     start = 0
     length = 0
     for index, token in enumerate(tokens):
+        if layout_rewind(index):
+            append_segment(start, index)
+            start, length = index, 0
         length += len(token) + (1 if index > start else 0)
         should_close = (
             (length >= minimum and bool(sentence_end.search(token)))
@@ -62,13 +90,7 @@ def _segments(page, target=520, minimum=240, maximum=760):
         if not should_close and index + 1 < len(tokens):
             continue
         end = index + 1
-        result.append(
-            {
-                "text": " ".join(tokens[start:end]),
-                "word_start": start if has_positions else None,
-                "word_end": end if has_positions else None,
-            }
-        )
+        append_segment(start, end)
         start, length = end, 0
     return result
 

@@ -113,6 +113,28 @@ class ContextTests(unittest.TestCase):
         )
         self.assertEqual(page_sources[0]["anchor"]["quote"], page_sources[0]["text"])
 
+    def test_layout_rewind_prevents_two_column_source_groups(self):
+        words = []
+        for column, x in enumerate((0.1, 0.6)):
+            for index in range(30):
+                y = 0.15 + index * 0.02
+                words.append(
+                    {
+                        "text": f"c{column}w{index}",
+                        "rect": [x, y, x + 0.04, y + 0.015],
+                    }
+                )
+        self.db.execute(
+            "UPDATE pages SET text=?,words=? WHERE paper_id=? AND number=1",
+            (" ".join(word["text"] for word in words), json.dumps(words), "paper"),
+        )
+        packet, _ = build_summary_context(self.db, self.paper, "topic", "post-read")
+        page_sources = [source for source in packet["sources"] if source["page"] == 1]
+        self.assertEqual(len(page_sources), 2)
+        for source in page_sources:
+            rects = source["anchor"]["rects"]
+            self.assertFalse(min(rect[0] for rect in rects) < 0.5 < max(rect[2] for rect in rects))
+
     def test_full_summary_sends_all_extracted_text_without_app_cap(self):
         packet, messages = build_summary_context(
             self.db, self.paper, "topic", "post-read"

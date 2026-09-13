@@ -47,7 +47,9 @@ stop the application before copying it. No automatic migration of previous counc
    the first-page overview. It sends at most 24 excerpts, 24,000 source characters and 10,000 history characters.
    `Full paper` places all extractable source groups in a deterministic message before up to 80 history messages /
    120,000 history characters. The stable paper prefix is designed for provider prefix caching. The preview shows the
-   exact source text before a paid call.
+   exact source text before a paid call. Sentence groups target 520 characters, prefer sentence/clause endings after
+   240 characters and stop at 760. A word-box vertical rewind creates a hard boundary so the bottom of one PDF column
+   cannot share a source group with the top of the next column.
 5. Region questions attach a bounded PNG rendered by Poppler; text questions send text. No OCR is silently
    substituted. Image-only pages require a vision-enabled provider and a region selection.
 6. Answers use `[p.N ¶K]`; only supplied source groups become clickable citations. These are locators, not proof
