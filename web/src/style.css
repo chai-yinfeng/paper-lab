@@ -285,12 +285,6 @@ select:focus-visible {
   background: #314b3c;
   color: white;
 }
-.footnote {
-  text-align: center;
-  font-size: 12px;
-  color: #8b9387;
-  margin: 10px 0 18px;
-}
 dialog {
   width: min(580px, 90vw);
   border: 1px solid #dce1d9;
@@ -497,6 +491,12 @@ button.icon {
 .tab.active {
   color: #2c4634;
   border-bottom: 2px solid #557549;
+}
+.persistence-note {
+  margin-left: auto;
+  color: #8b9387;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .topic-bar {
   display: flex;
@@ -1271,12 +1271,6 @@ hr {
 .selection-chip summary {
   cursor: pointer;
   color: #52694d;
-}
-.keyboard-hint {
-  margin-top: 4px;
-  font-size: 10px !important;
-  color: #9aa297 !important;
-  justify-content: flex-end !important;
 }
 .pdf-scroll {
   outline: none;

@@ -955,6 +955,9 @@ export default function App() {
           >
             <NotebookPen size={16} /> 笔记 {notes.length || ""}
           </button>
+          <span className="persistence-note">
+            对话自动保存 · 笔记由你确认
+          </span>
         </header>
         {tab === "chat" ? (
           <>
@@ -1312,9 +1315,6 @@ export default function App() {
                 />
                 检索外部学术资料
               </label>
-              <div className="keyboard-hint">
-                Enter 发送 · Shift + Enter 换行
-              </div>
             </div>
             {status?.configured && !status.key_configured ? (
               <button
@@ -1323,9 +1323,7 @@ export default function App() {
               >
                 配置 API key 后开始对话
               </button>
-            ) : (
-              <p className="footnote">对话自动保存 · 笔记由你确认</p>
-            )}
+            ) : null}
           </>
         ) : (
           <div className="notes-panel">
